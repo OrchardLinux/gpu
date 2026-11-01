@@ -17,6 +17,7 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 [ -f "$OUT/libvulkan_powervr_mesa.so" ] || { echo "run build-vk.sh first" >&2; exit 1; }
 [ -f "$OUT/root.sqfs" ] || { echo "run build-root.sh first" >&2; exit 1; }
+[ -f "$HERE/../out/kms-grab" ] || { echo "run mesa/build-gl-tests.sh first (kms-grab)" >&2; exit 1; }
 
 if ! orchard exec -- test -d /run/arch/usr; then
     orchard push "$OUT/root.sqfs" /run/arch.sqfs > /dev/null
@@ -24,7 +25,8 @@ if ! orchard exec -- test -d /run/arch/usr; then
         mount -t squashfs -o loop,ro /run/arch.sqfs /run/arch-ro &&
         mount -t overlay overlay -o lowerdir=/run/arch-ro,upperdir=/run/arch-rw/upper,workdir=/run/arch-rw/work /run/arch &&
         for d in dev proc sys; do mount --bind /$d /run/arch/$d; done &&
-        mount --bind /dev/pts /run/arch/dev/pts && mount -t tmpfs tmpfs /run/arch/tmp &&
+        mount --bind /dev/pts /run/arch/dev/pts &&
+        mkdir -p /run/arch/dev/shm && mount -t tmpfs tmpfs /run/arch/dev/shm && mount -t tmpfs tmpfs /run/arch/tmp &&
         mkdir -p /run/arch/run/user/0 && chmod 700 /run/arch/run/user/0'
 fi
 
@@ -42,6 +44,8 @@ orchard exec -- sh -c 'rm -rf /run/arch/opt/omarchy && mkdir -p /run/arch/opt/om
     cp -r /run/arch/opt/omarchy/labwc-theme/* /run/arch/root/.local/share/themes/ &&
     cp /run/arch/opt/omarchy/labwc-rc.xml /run/arch/root/.config/labwc/rc.xml'
 orchard push "$HERE/start-labwc.sh" /run/start-labwc.sh > /dev/null
+orchard push "$HERE/../out/kms-grab" /run/arch/usr/local/bin/kms-grab > /dev/null
+orchard exec -- chmod +x /run/arch/usr/local/bin/kms-grab
 orchard exec -- chroot /run/arch sh -c 'VK_LOADER_DEBUG=error PVR_I_WANT_A_BROKEN_VULKAN_DRIVER=1 \
     vulkaninfo --summary 2>&1 | grep -E "deviceName|driverName|apiVersion" | head -3'
 echo "ready: /run/start-labwc.sh [gpu|cpu] [SECONDS]"
