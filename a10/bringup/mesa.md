@@ -1,7 +1,7 @@
 # Mesa on the A10 GPU (G9P): bring-up guide, Vulkan driver part
 
 Written 2026-11-01 against the Mesa fork
-the Mesa fork (`mesa-g9p`), branch `g9p`, head `b9721ab4b49`
+the Mesa fork (OrchardLinux/mesa), branch `main`, at `b9721ab4b49`
 (upstream base `801952de2f1`), and the lab notes in
 `a10/` (MESA.md, RENDER.md, ISA.md, COMPUTE.md, REFERENCE.md,
 PDS-OFFLINE.md). The notes are chronological; where they disagree with each
