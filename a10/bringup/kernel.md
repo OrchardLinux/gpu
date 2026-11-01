@@ -344,8 +344,8 @@ The upstream `powervr` driver is reused. The Apple variant is selected by
     §19.1).
 11. **Self-tests (removed):** during bring-up `apple_selftest` ran compute
     jobs (including in a second VM) and the captured triangle. They were
-    dropped when the driver went to main (b5e3769); the commits before it
-    on dev/gpu-a10 have them.
+    dropped when the driver went to orchard main (b5e3769); the last driver
+    patch with them is `tools/a10/kernel/bringup-driver-with-selftests.patch`.
 
 Teardown, `pvr_apple_fw_fini()`: switch GPU context 0 back to the kernel
 VM, cancel fences, request Fender state 0, `apple_rtkit_shutdown()`, clear
@@ -700,11 +700,11 @@ Prefer the later reading.
   software panic), then r0–r12, sp, lr, pc, cpsr, then DFSR/DFAR-like words
   in LPAE format (FENDER.md §9.1, §16.1). Map the pc into the disassembled
   image.
-- **`apple_pm_trace=N` (removed from the driver on main, b5e3769; in the
-  dev/gpu-a10 history):** logged every event before acknowledging it,
+- **`apple_pm_trace=N` (removed from the driver on main, b5e3769; in
+  `tools/a10/kernel/bringup-driver-with-selftests.patch`):** logged every event before acknowledging it,
   dumped the free-list descriptor, PM state and PM slot every Nth geometry
   job, and checked the free list's page stack for changed, foreign and
-  repeated entries. Re-add it from that history when a parameter-memory
+  repeated entries. Re-add it from that patch when a parameter-memory
   problem needs it.
 - **Hang report:** `pvr_apple_report_hang()` prints stamps, submission
   counters, the fragment-retired word, ring producers and event indices. A

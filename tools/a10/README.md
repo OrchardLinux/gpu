@@ -76,7 +76,7 @@ podman run --rm -v PATH/TO/mesa:/mesa localhost/orchard-mesa-g9p:sid sh -c '
 | `tools/pvr-*.c` | powervr UAPI test programs (compute, render, triangle) |
 | `tools/agx-init*.sh` | the numbered firmware-init experiments of FENDER.md and COMPUTE.md (historical) |
 | `ios-capture/` | the iPadOS-side capture tool (ad-hoc signed; runs under palera1n) |
-| `kernel/` | the first, out-of-tree bring-up modules (historical) |
+| `kernel/` | the first, out-of-tree bring-up modules and early driver patches (historical); `bringup-driver-with-selftests.patch` is the last driver patch with the self-tests and the parameter-manager trace, before they left the driver on orchard main |
 
 Apple data stays out of git: firmware, kernelcaches, device-tree dumps,
 captures and compiled Apple shaders are gitignored and only ever local.

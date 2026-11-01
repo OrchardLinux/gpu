@@ -586,7 +586,7 @@ Hardware rules the compiler follows (all tested on the A10, ISA.md):
   `pvr_render_job_ws_submit_info_init`;
   `winsys/powervr/pvr_drm_job_render.c:pvr_drm_winsys_render_submit`.
 - **Verify**: `vk-tri TRI_DRAWS=N` at full size, raising N until the
-  geometry job hangs; `apple_pm_trace` (a bring-up trace, now only in the dev history) showed pages used per scene.
+  geometry job hangs; `apple_pm_trace` (a bring-up trace, now only in `tools/a10/kernel/bringup-driver-with-selftests.patch`) showed pages used per scene.
 - **A9**: firmware-dependent, unknown. Check whether the A9 firmware's
   StartTA sequence has an out-of-memory branch before copying the stopgap.
 
@@ -682,7 +682,7 @@ How the `G9P_SYNC` variants combine: TIME, PROBE and GRAB are an
 effect.
 
 Kernel-side companions (not Mesa): `modprobe powervr dyndbg=+p` for firmware
-mailbox messages, `apple_pm_trace` (dev history), and the kernel's `hang: fragment job N`
+mailbox messages, `apple_pm_trace` (`tools/a10/kernel/bringup-driver-with-selftests.patch`), and the kernel's `hang: fragment job N`
 timeout report. Recovery trap: a hung job can leave processes in state D. If
 `rmmod` fails, reboot, and treat later results as invalid (MESA.md).
 
