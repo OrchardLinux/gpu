@@ -1,0 +1,15 @@
+# Mesa build image for the Zink/EGL/GBM path toward Hyprland (arm64): Debian
+# unstable, the release whose runtime (Containerfile.runtime-sid) packages
+# Hyprland. Build: podman build -f Containerfile.sid -t orchard-mesa-g9p:sid
+FROM docker.io/library/debian:sid
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential meson ninja-build pkgconf git ca-certificates \
+        python3 python3-mako python3-yaml python3-packaging python3-ply \
+        bison flex glslang-tools spirv-tools libdrm-dev libexpat1-dev zlib1g-dev \
+        libzstd-dev libelf-dev libvulkan-dev libvulkan1 vulkan-tools \
+        libwayland-dev wayland-protocols libwayland-egl-backend-dev \
+        libudev-dev libxkbcommon-dev libglvnd-dev \
+        libegl-dev libgles-dev libgbm-dev \
+        llvm-21-dev libclang-21-dev libclang-cpp21-dev clang-21 libclc-21-dev \
+        llvm-spirv-21 libllvmspirvlib-21-dev spirv-tools-dev libdisplay-info-dev \
+    && rm -rf /var/lib/apt/lists/*

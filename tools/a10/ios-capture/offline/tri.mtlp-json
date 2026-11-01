@@ -1,0 +1,1 @@
+{"pipelines":{"render_pipelines":[{"vertex_function":"tri_vs","fragment_function":"tri_fs","color_attachments":[{"pixel_format":"BGRA8Unorm"}]}]}}

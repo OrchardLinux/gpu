@@ -1,0 +1,70 @@
+#!/bin/busybox sh
+# Start Apple's GFX firmware on gfx-kf and wait for the RTKit HELLO.
+# Sequence from FENDER.md sections 2 and 4.4; the timebase sync (step 5) is skipped.
+# Then run rtkit-mgmt for the RTKit management handshake.
+# Every step prints first, so a fault leaves the failing step on screen.
+set -eu
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+FW=/usr/share/gpu-001/gfx-g9p.bin
+SIZE=0x8f000   # image runtime region; the window maps the whole buffer
+WINDOW=0x100000
+W=0x201d02000   # GFX window copy and run bit (reg 1 of gfx-kf)
+A=0x201d20000   # AppleA7IOPV2 registers (reg 0 of gfx-kf)
+
+r32() { devmem "$(printf '0x%x' $(($1)))" 32; }
+w32() { echo "  w $(printf '0x%x' $(($1))) = $(printf '0x%x' $(($2)))"; devmem "$(printf '0x%x' $(($1)))" 32 "$(printf '0x%x' $(($2)))"; }
+
+echo '1. ps_gfx on (no RGX access: the core stays gated until the firmware wakes it)'
+PS=0x20e080328
+v=$(r32 $PS)
+[ $((v >> 4 & 0xf)) -eq 15 ] || devmem $PS 32 $(((v & ~0xf) | 0xf))
+n=0
+until [ $(($(r32 $PS) >> 4 & 0xf)) -eq 15 ]; do
+    n=$((n + 1)); [ $n -lt 100 ] || { echo "  GFX not active: $(r32 $PS)"; exit 1; }
+    usleep 1000
+done
+echo "  ps_gfx $(r32 $PS)"
+
+echo '2. place image'
+[ -d /sys/kernel/debug/gpu_fwbuf ] || {
+    mountpoint -q /sys/kernel/debug || mount -t debugfs debugfs /sys/kernel/debug
+    insmod "$(find /lib/modules -name gpu_fwbuf.ko | head -1)"
+}
+read -r P BUFSIZE < /sys/kernel/debug/gpu_fwbuf/phys
+P=$((P)); echo "  buffer $(printf '0x%x' $P) size $BUFSIZE"
+[ $((BUFSIZE)) -ge $((WINDOW)) ] && [ $((P & 0x3fff)) -eq 0 ] || { echo 'buffer too small or unaligned'; exit 1; }
+dd if=/dev/zero of=/sys/kernel/debug/gpu_fwbuf/data bs=4096 count=$((SIZE / 4096)) 2>/dev/null
+dd if=$FW of=/sys/kernel/debug/gpu_fwbuf/data conv=notrunc 2>/dev/null
+cmp -n "$(wc -c < $FW)" $FW /sys/kernel/debug/gpu_fwbuf/data && echo '  image verified in buffer'
+
+echo '3. firmware window (both copies)'
+w32 $((W + 0x0c)) $((P & 0xffffffff)); w32 $((W + 0x10)) $((P >> 32))
+w32 $((W + 0x14)) 0; w32 $((W + 0x18)) 0
+w32 $((W + 0x1c)) $WINDOW; w32 $((W + 0x20)) 0
+w32 $((A + 0x08)) $((P & 0xffffffff)); w32 $((A + 0x10)) $((P >> 32))
+w32 $((A + 0x18)) 0; w32 $((A + 0x20)) 0
+w32 $((A + 0x28)) $WINDOW; w32 $((A + 0x30)) 0
+w32 $((A + 0x38)) 1
+
+echo '4. mailbox'
+w32 $((A + 0x4000)) 0x1111; w32 $((A + 0xc00)) 0x1111
+w32 $((A + 0x4004)) 0x1; w32 $((A + 0xc04)) 0x1
+w32 $((A + 0x4004)) 0x1000; w32 $((A + 0xc04)) 0x1000
+w32 $((A + 0x4020)) $(($(r32 $((A + 0x4020))) | 1))
+echo "  inbox $(r32 $((A + 0x4008))) outbox $(r32 $((A + 0x4020))) idle $(r32 $((A + 0x4040)))"
+
+echo '6. run'
+w32 $((W + 0x48)) $(($(r32 $((W + 0x48))) | 1))
+
+echo '7. wait for the first message (left in the outbox)'
+n=0
+while [ $(($(r32 $((A + 0x4020))) >> 17 & 1)) -eq 1 ]; do
+    n=$((n + 1))
+    if [ $n -ge 50 ]; then
+        echo "  no message after ~5 s: outbox $(r32 $((A + 0x4020))) idle $(r32 $((A + 0x4040))) run $(r32 $((W + 0x48)))"
+        exit 1
+    fi
+    usleep 100000
+done
+echo "  first message waiting after ~$((n * 100)) ms; rtkit-mgmt reads and answers it"

@@ -1,0 +1,27 @@
+#version 450
+// Animated Julia set (vk-fx): floats, a loop with breaks, push constants,
+// conversions and 2D workgroup IDs through the G9P backend.
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) buffer Out { uint px[]; };
+layout(push_constant) uniform P { float cx, cy, zoom, shift; };
+void main()
+{
+   uint x = gl_WorkGroupID.x * 64u + gl_LocalInvocationID.x;
+   uint y = gl_WorkGroupID.y;
+   float zx = (float(x) - 384.0) * zoom, zy = (float(y) - 512.0) * zoom;
+   uint i = 0u;
+   for (; i < 128u; i++) {
+      float xx = zx * zx, yy = zy * zy;
+      if (xx + yy > 16.0)
+         break;
+      zy = 2.0 * zx * zy + cy;
+      zx = xx - yy + cx;
+   }
+   uint col = 0u;
+   if (i < 128u) {
+      uint k = (i * 7u + uint(shift * 255.0)) & 255u;
+      uint glow = uint(min(float(i) * 4.0, 255.0));
+      col = (k << 16) | (((k * 3u) & 255u) << 8) | max(255u - k, glow);
+   }
+   px[y * 768u + x] = 0xff000000u | col;
+}

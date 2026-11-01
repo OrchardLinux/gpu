@@ -1,0 +1,16 @@
+# Build output of the payloads and tools (orchard build, tools/*/out)
+out/
+build/
+.work/
+__pycache__/
+*.py[cod]
+.venv*/
+.DS_Store
+orchard.local.toml
+
+# Apple data stays local: firmware, kernelcaches, IPSWs, device trees,
+# captures and compiled Apple shaders are never committed. The chip
+# directories' own .gitignore files name their paths.
+*.ipsw
+kernelcache*
+*.im4p

@@ -1,0 +1,36 @@
+#include <metal_stdlib>
+using namespace metal;
+kernel void imm_0(device uint *o [[buffer(0)]]) { o[0] = 0u; }
+kernel void imm_b0(device uint *o [[buffer(0)]]) { o[0] = 1u; }
+kernel void imm_b1(device uint *o [[buffer(0)]]) { o[0] = 2u; }
+kernel void imm_b2(device uint *o [[buffer(0)]]) { o[0] = 4u; }
+kernel void imm_b3(device uint *o [[buffer(0)]]) { o[0] = 8u; }
+kernel void imm_b4(device uint *o [[buffer(0)]]) { o[0] = 16u; }
+kernel void imm_b5(device uint *o [[buffer(0)]]) { o[0] = 32u; }
+kernel void imm_b6(device uint *o [[buffer(0)]]) { o[0] = 64u; }
+kernel void imm_b7(device uint *o [[buffer(0)]]) { o[0] = 128u; }
+kernel void imm_b8(device uint *o [[buffer(0)]]) { o[0] = 256u; }
+kernel void imm_b9(device uint *o [[buffer(0)]]) { o[0] = 512u; }
+kernel void imm_b10(device uint *o [[buffer(0)]]) { o[0] = 1024u; }
+kernel void imm_b11(device uint *o [[buffer(0)]]) { o[0] = 2048u; }
+kernel void imm_b12(device uint *o [[buffer(0)]]) { o[0] = 4096u; }
+kernel void imm_b13(device uint *o [[buffer(0)]]) { o[0] = 8192u; }
+kernel void imm_b14(device uint *o [[buffer(0)]]) { o[0] = 16384u; }
+kernel void imm_b15(device uint *o [[buffer(0)]]) { o[0] = 32768u; }
+kernel void imm_b16(device uint *o [[buffer(0)]]) { o[0] = 65536u; }
+kernel void imm_b17(device uint *o [[buffer(0)]]) { o[0] = 131072u; }
+kernel void imm_b18(device uint *o [[buffer(0)]]) { o[0] = 262144u; }
+kernel void imm_b19(device uint *o [[buffer(0)]]) { o[0] = 524288u; }
+kernel void imm_b20(device uint *o [[buffer(0)]]) { o[0] = 1048576u; }
+kernel void imm_b21(device uint *o [[buffer(0)]]) { o[0] = 2097152u; }
+kernel void imm_b22(device uint *o [[buffer(0)]]) { o[0] = 4194304u; }
+kernel void imm_b23(device uint *o [[buffer(0)]]) { o[0] = 8388608u; }
+kernel void imm_b24(device uint *o [[buffer(0)]]) { o[0] = 16777216u; }
+kernel void imm_b25(device uint *o [[buffer(0)]]) { o[0] = 33554432u; }
+kernel void imm_b26(device uint *o [[buffer(0)]]) { o[0] = 67108864u; }
+kernel void imm_b27(device uint *o [[buffer(0)]]) { o[0] = 134217728u; }
+kernel void imm_b28(device uint *o [[buffer(0)]]) { o[0] = 268435456u; }
+kernel void imm_b29(device uint *o [[buffer(0)]]) { o[0] = 536870912u; }
+kernel void imm_b30(device uint *o [[buffer(0)]]) { o[0] = 1073741824u; }
+kernel void imm_b31(device uint *o [[buffer(0)]]) { o[0] = 2147483648u; }
+kernel void imm_ff(device uint *o [[buffer(0)]]) { o[0] = 0xffffffffu; }

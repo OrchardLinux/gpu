@@ -1,0 +1,1 @@
+GPU untouched. Run gpu-probe (read-only), then gpu-probe --power-on.

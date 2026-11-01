@@ -1,0 +1,14 @@
+# Device-side chroot for the Zink/Hyprland work: Debian unstable runtime with
+# Hyprland, GL test clients and a terminal; the fork's Mesa (Vulkan driver,
+# Zink, EGL, GBM) is installed over it by mesa/deploy-zink.sh.
+# Build: podman build -f Containerfile.runtime-sid -t orchard-mesa-g9p-runtime:sid
+FROM docker.io/library/debian:sid
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libvulkan1 vulkan-tools libdrm2 libexpat1 zlib1g libzstd1 libelf1t64 \
+        libwayland-client0 libwayland-server0 libwayland-egl1 libudev1 \
+        hyprland kmscube mesa-utils-bin glmark2-es2-drm glmark2-es2-wayland foot \
+        strace seatd procps \
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale \
+    && rm -f /usr/lib/aarch64-linux-gnu/libLLVM*.so* /usr/lib/aarch64-linux-gnu/libgallium-*.so /usr/lib/aarch64-linux-gnu/libz3.so*
+# (Debian's LLVM, gallium and z3 are only used by its own Mesa, which the fork's build replaces:
+# the chroot lives in the iPad's RAM.)

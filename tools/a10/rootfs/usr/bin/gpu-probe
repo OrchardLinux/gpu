@@ -1,0 +1,80 @@
+#!/bin/busybox sh
+# First GPU look on T8010: identify the Rogue core and the gfx-kf coprocessor.
+# Default is read-only. GPU registers are read only while the GFX power state
+# reports active; touching a gated block faults the SoC. --power-on is the
+# only write: it sets the GFX power-state target, like the pmgr driver would.
+#
+# Addresses come from the T8010 ADT (/arm-io base 0x200000000):
+#   sgx     gpu,t8010       0x201000000 + 0x100000, 0x201d00000 + 0x20000
+#   gfx-kf  iop-gfx,t8010   0x201d20000 + 0x10000 (RTBuddy, firmware "GFX")
+#   pmgr    GFX (id 0x7c)   0x20e080328; GFX-SGX/-KF/-BUSY have no own PS
+set -eu
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+PS_GFX=0x20e080328
+GPU=0x201000000
+GPU_SHARED=0x201d00000
+KF=0x201d20000
+
+r32() { devmem "$(printf '0x%x' $(($1)))" 32; }
+# Announce each access first: if it faults the SoC, the last line names it.
+show() {
+    printf '%-28s %-12s ' "$1" "$(printf '0x%x' $(($2)))"
+    r32 "$2"
+}
+
+ps_state() {
+    v=$(r32 $PS_GFX)
+    printf 'ps_gfx %s target=%x actual=%x\n' "$v" $((v & 0xf)) $(((v >> 4) & 0xf))
+}
+
+gfx_active() { [ $((($(r32 $PS_GFX) >> 4) & 0xf)) -eq 15 ]; }
+
+power_on() {
+    v=$(r32 $PS_GFX)
+    devmem $PS_GFX 32 $(((v & ~0xf) | 0xf))
+    n=0
+    until gfx_active; do
+        n=$((n + 1))
+        [ "$n" -lt 100 ] || { echo 'GFX did not report active'; ps_state; return 1; }
+        usleep 1000
+    done
+}
+
+probe() {
+    uname -a
+    if mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || [ -d /sys/kernel/debug/pm_genpd ]; then
+        grep -E 'domain|gfx' /sys/kernel/debug/pm_genpd/pm_genpd_summary 2>/dev/null || true
+    fi
+    ps_state
+    if ! gfx_active; then
+        echo 'GFX power state is not active; GPU registers left untouched.'
+        echo 'Run gpu-probe --power-on to enable GFX and read them.'
+        return 0
+    fi
+    # Safest first: gfx-kf is the coprocessor side, the Rogue core may sit
+    # behind a second, GPU-internal gate that only the kext/firmware opens.
+    echo '# gfx-kf ASC'
+    show ASC_CPU_CONTROL $((KF + 0x44))
+    show MBOX_A2I_CONTROL $((KF + 0x8110))
+    show MBOX_I2A_CONTROL $((KF + 0x8114))
+    echo '# Shared window'
+    for off in 0x0 0x4 0x8 0xc; do show "shared+$off" $((GPU_SHARED + off)); done
+    [ "${STOP_BEFORE_ROGUE:-0}" = 1 ] && { echo 'Stopping before Rogue registers'; return 0; }
+    echo '# Rogue core (ROGUE_CR_*)'
+    show CORE_ID.lo $((GPU + 0x18))
+    show CORE_ID.hi $((GPU + 0x1c))
+    show CORE_REVISION.lo $((GPU + 0x20))
+    show CORE_REVISION.hi $((GPU + 0x24))
+    for off in 0x0 0x8 0x10 0x14; do show "gpu+$off" $((GPU + off)); done
+    show META_SP_MSLVCTRL0 $((GPU + 0xa10))
+    show META_SP_MSLVCTRL1 $((GPU + 0xa18))
+}
+
+log=/run/gpu-001-$(date +%s)-$$.log
+case "${1:-}" in
+    '') probe ;;
+    --power-on) { ps_state; echo 'Writing GFX target 0xf'; power_on; echo 'GFX active'; probe; } ;;
+    *) echo "usage: gpu-probe [--power-on]" >&2; exit 2 ;;
+esac 2>&1 | tee "$log"
+echo "Saved to $log"

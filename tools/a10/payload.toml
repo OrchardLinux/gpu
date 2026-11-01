@@ -1,0 +1,14 @@
+# payload.toml: how `orchard build` turns this directory into a RAM payload.
+#
+# A payload is `init` (the first program the kernel runs) plus the files under
+# `rootfs/`. `orchard build` makes one for every board of a platform; `orchard
+# run` builds what is missing and boots the attached board. This file describes
+# the payload only, never which board it is for.
+
+# Stage the kernel's modules (not loaded): the GPU driver is the powervr
+# module, loaded by hand with `modprobe powervr exp_hw_support=1`.
+modules = true
+
+# The GPU firmware (apple/gfx-t8010.bin) is extracted locally into
+# rootfs/lib/firmware (gitignored), so the board's firmware layer is not needed.
+firmware = false

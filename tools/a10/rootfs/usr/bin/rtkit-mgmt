@@ -1,0 +1,68 @@
+#!/bin/busybox sh
+# RTKit management handshake with the GFX firmware after gfx-boot, by hand.
+# Mailbox word: endpoint in bits 63:56, payload in bits 55:0 (FENDER.md section 5).
+# Message types follow mainline drivers/soc/apple/rtkit.c.
+set -eu
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+
+A=0x201d20000
+CRASHLOG_IOVA=0x90000   # inside the 1 MB window gfx-boot maps; zeroed by the module
+IDLE_LIMIT=${IDLE_LIMIT:-30}   # x 100 ms without traffic before giving up
+
+hex() { printf '0x%016x' $(($1)); }
+tx() {
+    echo "  tx $(hex $1)  $2"
+    # Doorbell (FENDER.md 6) is opt-in: ringing it during the handshake made the
+    # firmware stop reading its inbox on hardware; the clean handshake needs none.
+    [ "${DOORBELL:-0}" = 1 ] && { devmem $((A + 0xc004)) 32 0x11; devmem $((A + 0xc024)) 32 1; }
+    devmem $((A + 0x4010)) 64 "$(hex $1)"
+}
+state() { echo "  inbox $(devmem $((A + 0x4008)) 32) outbox $(devmem $((A + 0x4020)) 32) idle $(devmem $((A + 0x4040)) 32)"; }
+
+idle=0
+started=0
+while [ $idle -lt $IDLE_LIMIT ]; do
+    if [ $(($(devmem $((A + 0x4020)) 32) >> 17 & 1)) -eq 1 ]; then
+        idle=$((idle + 1))
+        usleep 100000
+        continue
+    fi
+    idle=0
+    m=$(($(devmem $((A + 0x4038)) 64)))
+    ep=$((m >> 56 & 0xff))
+    p=$((m & 0x00ffffffffffffff))
+    type=$((p >> 52 & 0xff))
+    echo "rx $(hex $m)  ep $(printf 0x%x $ep) type $(printf 0x%x $type)"
+    if [ $ep -eq 0 ]; then
+        case $type in
+        1)  min=$((p & 0xffff)); max=$((p >> 16 & 0xffff)); v=$max; [ $v -le 12 ] || v=12
+            echo "  HELLO versions $min..$max"
+            tx $(((2 << 52) | (v << 16) | v)) "HELLO_REPLY v$v" ;;
+        8)  base=$((p >> 32 & 7)); last=$((p >> 51 & 1))
+            echo "  EPMAP base $base bitmap $(printf 0x%x $((p & 0xffffffff))) last $last"
+            if [ $last -eq 1 ]; then
+                tx $(((8 << 52) | (base << 32) | (1 << 51))) "EPMAP ack base $base (last)"
+            else
+                tx $(((8 << 52) | (base << 32) | 1)) "EPMAP ack base $base (more)"
+            fi
+            if [ $last -eq 1 ] && [ $started -eq 0 ]; then
+                started=1
+                for e in 1 0x20 0x21; do tx $(((5 << 52) | (e << 32) | 2)) "STARTEP $e"; done
+                tx $(((6 << 52) | 0x20)) "IOP_PWR_STATE on"
+            fi ;;
+        7)  echo "  IOP power ack $(printf 0x%x $((p & 0xffff)))"
+            tx $(((0xb << 52) | 0x20)) "AP_PWR_STATE on" ;;
+        11) echo "  AP power ack $(printf 0x%x $((p & 0xffff)))" ;;
+        *)  echo "  unhandled management message" ;;
+        esac
+    elif [ $ep -eq 1 ] && [ $type -eq 1 ]; then
+        pages=$((p >> 44 & 0xff)); iova=$((p & 0xfffffffffff))
+        echo "  crashlog buffer request: $pages pages at $(printf 0x%x $iova)"
+        tx $(((1 << 56) | (1 << 52) | (pages << 44) | CRASHLOG_IOVA)) "crashlog buffer at $(printf 0x%x $CRASHLOG_IOVA)"
+    else
+        echo "  message for endpoint $(printf 0x%x $ep)"
+    fi
+    state
+done
+echo "no traffic for $((IDLE_LIMIT / 10)) s"
+state

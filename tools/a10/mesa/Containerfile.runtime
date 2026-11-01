@@ -1,0 +1,8 @@
+# Device-side chroot userland for testing the Mesa build on the iPad: the
+# same Debian release as the build image, runtime libraries and the Vulkan
+# loader and tools only. Exported with `podman export` and unpacked in /run.
+FROM docker.io/library/debian:trixie
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libvulkan1 vulkan-tools libdrm2 libexpat1 zlib1g libzstd1 libelf1t64 \
+        strace gdb \
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale

@@ -1,0 +1,12 @@
+# Mesa build and test userland for the A10 GPU work (arm64, native on Apple
+# Silicon hosts). The same image is exported as the iPad's chroot userland,
+# so the built driver and the loader/tools on the device share one libc.
+FROM docker.io/library/debian:trixie
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential meson ninja-build pkgconf git ca-certificates \
+        python3 python3-mako python3-yaml python3-packaging python3-ply \
+        bison flex glslang-tools spirv-tools libdrm-dev libexpat1-dev zlib1g-dev \
+        libzstd-dev libelf-dev libvulkan-dev libvulkan1 vulkan-tools \
+        llvm-dev libclang-dev libclang-cpp-dev clang libclc-19 libclc-19-dev \
+        llvm-spirv-19 libllvmspirvlib-19-dev \
+    && rm -rf /var/lib/apt/lists/*

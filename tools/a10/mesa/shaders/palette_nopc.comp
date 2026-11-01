@@ -1,0 +1,15 @@
+#version 450
+// palette.comp without push constants
+layout(local_size_x = 64) in;
+layout(set = 0, binding = 0) buffer B { uint d[]; };
+layout(push_constant) uniform P { float scale, offset; };
+void main()
+{
+   uint i = gl_GlobalInvocationID.x, n = i & 255u, col = 0u;
+   if (n < 128u) {
+      uint k = (n * 7u + 127u) & 255u;
+      uint glow = uint(min(float(n) * 4.0, 255.0));
+      col = (k << 16) | (((k * 3u) & 255u) << 8) | max(255u - k, glow);
+   }
+   d[i] = 0xff000000u | col;
+}

@@ -1,0 +1,7 @@
+# Apple firmware extracted locally from the IPSW; never commit.
+rootfs/usr/share/gpu-001/*.bin
+rootfs/lib/firmware/
+tools/*.bin
+rootfs/usr/bin/pvr-compute-test
+# explore-render.py's work directories: compiled Apple shaders; never commit.
+tools/isa/probes/*.build/

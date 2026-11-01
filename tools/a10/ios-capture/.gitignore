@@ -1,0 +1,3 @@
+build/
+offline/*.metallib
+offline/*.bin
