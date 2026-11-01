@@ -1,0 +1,21 @@
+# Device-side root for the Omarchy A GPU experiment: Arch Linux ARM with what
+# Omarchy A's desktop draws with (Labwc, Quickshell, foot) and Arch's own Mesa
+# (EGL, GBM, Zink) and Vulkan loader; the fork's Vulkan driver is added on
+# the device (setup-device.sh). Slim, as it lives in the iPad's RAM.
+# Build: podman build -f Containerfile.runtime -t orchard-gpu-alarm-runtime .
+FROM docker.io/arch4edu/archlinuxarm@sha256:1db43d1af9917db5fd34af3dab64e2b229a21240e81bb765e3d2d3c34739d587
+RUN sed -i '/^DownloadUser = /d; /^CheckSpace/a DisableSandboxFilesystem\nDisableSandboxSyscalls' /etc/pacman.conf \
+ && printf 'Server = https://fl.us.mirror.archlinuxarm.org/$arch/$repo\n' > /etc/pacman.d/mirrorlist \
+ && pacman-key --init && pacman-key --populate archlinuxarm \
+ && pacman -Syu --noconfirm --needed labwc quickshell qt6-imageformats foot mesa \
+        vulkan-icd-loader vulkan-tools seatd wlr-randr grim ttf-dejavu \
+        ttf-jetbrains-mono-nerd ttf-nerd-fonts-symbols python jq socat procps-ng \
+ && pacman -Scc --noconfirm \
+ && rm -rf /usr/share/doc /usr/share/man /usr/share/info /usr/share/locale \
+        /usr/include /var/lib/pacman/sync /etc/pacman.d/gnupg
+# The base image's kernel, firmware and caches and the larger extras a RAM
+# root can do without (the shell's icons come from the Nerd symbols font).
+RUN pacman -Rdd --noconfirm linux-aarch64 $(pacman -Qq | grep '^linux-firmware') \
+        ttf-jetbrains-mono-nerd vim-runtime binutils qt6-translations \
+ && rm -rf /boot/* /usr/lib/firmware /usr/lib/modules /var/cache/* \
+        /usr/share/gir-1.0 /usr/share/vim

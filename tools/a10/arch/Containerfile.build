@@ -1,0 +1,17 @@
+# Arch Linux ARM build image for the Mesa fork's Vulkan driver, matching
+# Omarchy A's base (omarchy-a system/Containerfile, same pinned image). Only
+# the Vulkan driver is built here; GL, EGL, GBM and Zink stay Arch's own.
+# Build: podman build -f Containerfile.build -t orchard-gpu-alarm-build .
+FROM docker.io/arch4edu/archlinuxarm@sha256:1db43d1af9917db5fd34af3dab64e2b229a21240e81bb765e3d2d3c34739d587
+RUN sed -i '/^DownloadUser = /d; /^CheckSpace/a DisableSandboxFilesystem\nDisableSandboxSyscalls' /etc/pacman.conf \
+ && printf 'Server = https://fl.us.mirror.archlinuxarm.org/$arch/$repo\n' > /etc/pacman.d/mirrorlist \
+ && pacman-key --init && pacman-key --populate archlinuxarm \
+ && pacman -Syu --noconfirm --needed base-devel meson ninja python-mako python-yaml \
+        python-packaging python-ply bison flex glslang spirv-tools vulkan-headers \
+        libdrm expat zlib zstd libelf systemd-libs wayland wayland-protocols \
+        libdisplay-info libxkbcommon \
+ && pacman -Sc --noconfirm
+# The Vulkan driver compiles its internal shaders from OpenCL C (mesa-clc),
+# which needs LLVM and Clang at build time only
+RUN pacman -S --noconfirm --needed llvm clang libclc spirv-llvm-translator \
+ && pacman -Sc --noconfirm

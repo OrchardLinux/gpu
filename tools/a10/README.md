@@ -68,6 +68,7 @@ podman run --rm -v PATH/TO/mesa:/mesa localhost/orchard-mesa-g9p:sid sh -c '
 |---|---|
 | `init`, `payload.toml`, `rootfs/` | the payload: USB serial and SSH, the GPU driver staged as a module |
 | `mesa/` | Mesa and Hyprland on the device: setup, demo (`hypr-demo.sh`), frame-time benchmark (`hypr-bench.sh`), Vulkan tests (`vk-tri.c`, `vk-suite.sh`), screen grabs (`kms-grab.c`) |
+| `arch/` | the Omarchy A GPU experiment: an Arch Linux ARM root in RAM with Labwc, Omarchy A's shell and Arch's Mesa on the fork's Vulkan driver ([README](arch/README.md)) |
 | `tools/device/` | device-side tools: GPU and SoC/memory performance states, physical memory, the live Apple device tree, perf for the chroot, a kernel job timeline ([README](tools/device/README.md)) |
 | `tools/extract-firmware.sh` | the firmware, from your kernelcache |
 | `tools/patch-repo.sh` | edit the GPU driver's kernel patch layers in a small git repository (`ORCHARD=` an orchard checkout) |
