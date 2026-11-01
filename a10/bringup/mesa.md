@@ -768,19 +768,35 @@ timeout report. Recovery trap: a hung job can leave processes in state D. If
    shaders.
 3. More than one texture per shader: why only state at dword 0 samples
    correctly.
-4. Sampler fields: minification, wrap modes, the remaining format codes,
-   and non-trivial swizzles in the image state.
+4. Sampler fields: mirrored and border wrap modes, the remaining format
+   codes, and non-trivial swizzles in the image state. (Minification and
+   repeat are settled: section 3.7, Mesa `3ca781076f4`.)
 5. Depth/stencil (kmscube hangs), MSAA, multiple colour attachments, blend
    constants, indirect draws.
 6. Register 0x470's program (`015e a000`) and the EOT image state's second
    (zero) address: meanings open.
 7. Compiler speed: border and shadow shaders dominate composite time (2.6).
    Apple uses f16 operand forms and predication where we use f32 and the
-   mask stack.
+   mask stack. Two register-pressure ideas were tried on an unfinished
+   branch (Mesa `609fa73b8ad`, `wip/g9p-border-pressure`, deleted
+   2026-11-02; the border shader was made to fit with registers above r31
+   instead) and are not on `main`:
+   - **If-ladders to selects:** Hyprland's border shader reads two local
+     `vec4[10]` arrays with dynamic indices, which NIR turns into if-ladders
+     that keep phi webs alive across the ladder. `nir_opt_peephole_select`
+     with `.limit = 0` turns ladders whose legs only choose a value into
+     selects.
+   - **Copies at the use:** cheap loads (uniforms, varyings, the fragment
+     position) are copied right before each use, and for a phi source at
+     the end of its predecessor block, so no such value stays live across
+     branches. `main`'s `rematerialize_loads()` does a simpler version.
+   Both cut register pressure. Whether they make the shaders faster, not
+   only smaller, was never measured: try them with `hypr-bench.sh time`.
 8. Remaining per-render CPU work in `pvr_arch_render_state_setup` (SPM
    scratch buffer, PPP state BO): not profiled.
-9. A grab during a slow (5 s) window resize showed doubled text and a
-   cut-off window. Not looked into.
+9. (Fixed) A grab during a slow window resize showed doubled text: the
+   sampler packing had linear minification and V repeat swapped (MESA.md
+   "Resize glitch", Mesa `3ca781076f4`).
 10. A9: is the shader ISA Apple's (and which `metal-tt` target), does its
     firmware's geometry sequence handle out-of-memory, and does it blend in
     the shader? Answer these first. They decide how much of `g9p/` and
