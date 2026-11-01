@@ -778,7 +778,7 @@ timeout report. Recovery trap: a hung job can leave processes in state D. If
 7. Compiler speed: border and shadow shaders dominate composite time (2.6).
    Apple uses f16 operand forms and predication where we use f32 and the
    mask stack. Two register-pressure ideas were tried on an unfinished
-   branch (Mesa `609fa73b8ad`, `wip/g9p-border-pressure`, deleted
+   branch (Mesa `wip/g9p-border-pressure`, never published, deleted
    2026-11-02; the border shader was made to fit with registers above r31
    instead) and are not on `main`:
    - **If-ladders to selects:** Hyprland's border shader reads two local
