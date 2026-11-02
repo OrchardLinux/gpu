@@ -15,3 +15,9 @@ RUN sed -i '/^DownloadUser = /d; /^CheckSpace/a DisableSandboxFilesystem\nDisabl
 # which needs LLVM and Clang at build time only
 RUN pacman -S --noconfirm --needed llvm clang libclc spirv-llvm-translator \
  && pacman -Sc --noconfirm
+# The Vulkan test programs (build-vk-tests.sh) link the loader
+RUN printf 'Server = https://%s/$arch/$repo\n' mirrors.ustc.edu.cn/archlinuxarm \
+      mirrors.tuna.tsinghua.edu.cn/archlinuxarm ca.us.mirror.archlinuxarm.org \
+      fl.us.mirror.archlinuxarm.org > /etc/pacman.d/mirrorlist \
+ && pacman -S --noconfirm --needed vulkan-icd-loader \
+ && pacman -Sc --noconfirm

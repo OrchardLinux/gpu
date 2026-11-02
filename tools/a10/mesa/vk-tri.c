@@ -25,6 +25,15 @@
  * blend): TRI_VCOL=0.25,0.5,0.75,0.5 TRI_WANT=0xff4080df. TRI_BLEND=dst
  * keeps the tile's colour (TRI_WANT=0xff000040).
  *
+ * Depth: TRI_DEPTH=pass adds a D32_SFLOAT depth attachment, cleared to 1.0,
+ * and a pipeline with depth test LESS and depth writes: the triangle (z 0)
+ * passes and is drawn. TRI_DEPTH=fail clears it to 0.0: the triangle fails
+ * and only the clear colour remains. TRI_DEPTH=load stores that 0.0 from a
+ * render without draws and loads it in a second one that draws: the
+ * triangle fails only if the depth went to memory and came back.
+ * TRI_DEPTH=loadfirst loads depth that nothing stored (the fill, 0x55 or
+ * TRI_DEPTH_FILL=N) and draws: the triangle must at least not hang.
+ *
  * Job tests (each a reproduction of a hang or blank frame Hyprland had):
  *   TRI_DRAWS=N        the draw N times (long control streams)
  *   TRI_INSTANCES=N    N instances of it (the parameter buffer)
@@ -220,6 +229,12 @@ int main(int argc, char **argv)
 	VkQueue queue;
 	VkImage image;
 	VkImageView view;
+	/* TRI_DEPTH: the depth attachment */
+	const char *depth_mode = getenv("TRI_DEPTH");
+	VkImage dimage = VK_NULL_HANDLE;
+	VkImageView dview = VK_NULL_HANDLE;
+	uint32_t *dmap = NULL;
+	VkDeviceSize dsize = 0;
 	VkBuffer vb;
 	VkMemoryRequirements req;
 	VkDeviceMemory image_mem, vb_mem;
@@ -356,6 +371,30 @@ int main(int argc, char **argv)
 		};
 
 		CHECK(vkCreateImageView(dev, &ci, NULL, &view));
+	}
+	if (depth_mode) {
+		VkImageCreateInfo ci = {
+			.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+			.imageType = VK_IMAGE_TYPE_2D, .format = VK_FORMAT_D32_SFLOAT,
+			.extent = { W, H, 1 }, .mipLevels = 1, .arrayLayers = 1,
+			.samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+			.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+		};
+		VkImageViewCreateInfo vci = {
+			.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+			.viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_D32_SFLOAT,
+			.subresourceRange = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1 },
+		};
+		void *map;
+
+		CHECK(vkCreateImage(dev, &ci, NULL, &dimage));
+		vkGetImageMemoryRequirements(dev, dimage, &req);
+		CHECK(vkBindImageMemory(dev, dimage, alloc_bind(req, &map), 0));
+		memset(map, getenv("TRI_DEPTH_FILL") ? atoi(getenv("TRI_DEPTH_FILL")) : 0x55, req.size);
+		dmap = map;
+		dsize = req.size;
+		vci.image = dimage;
+		CHECK(vkCreateImageView(dev, &vci, NULL, &dview));
 	}
 	{
 		VkBufferCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -633,12 +672,19 @@ int main(int argc, char **argv)
 		VkPipelineRenderingCreateInfoKHR rci = {
 			.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR,
 			.colorAttachmentCount = 1, .pColorAttachmentFormats = &fmt,
+			.depthAttachmentFormat = depth_mode ? VK_FORMAT_D32_SFLOAT : VK_FORMAT_UNDEFINED,
+		};
+		VkPipelineDepthStencilStateCreateInfo dss = {
+			.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+			.depthTestEnable = VK_TRUE, .depthWriteEnable = VK_TRUE,
+			.depthCompareOp = VK_COMPARE_OP_LESS,
 		};
 		VkGraphicsPipelineCreateInfo ci = {
 			.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &rci,
 			.stageCount = 2, .pStages = stages, .pVertexInputState = &vi,
 			.pInputAssemblyState = &ia, .pViewportState = &vps,
 			.pRasterizationState = &rs, .pMultisampleState = &ms,
+			.pDepthStencilState = depth_mode ? &dss : NULL,
 			.pColorBlendState = &cb, .layout = layout,
 		};
 
@@ -657,12 +703,23 @@ int main(int argc, char **argv)
 			.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
 			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
 		};
+		VkRenderingAttachmentInfoKHR datt = {
+			.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO_KHR,
+			.imageView = dview,
+			.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+			.loadOp = depth_mode && !strcmp(depth_mode, "loadfirst")
+					  ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR,
+			.storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+			.clearValue.depthStencil.depth =
+				depth_mode && strcmp(depth_mode, "pass") ? 0.0f : 1.0f,
+		};
 		VkRenderingInfoKHR ri = {
 			.sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR,
 			.renderArea = { { 0, 0 }, { W, H } },
 			.layerCount = 1,
 			.colorAttachmentCount = 1,
 			.pColorAttachments = &att,
+			.pDepthAttachment = depth_mode ? &datt : NULL,
 		};
 		VkDeviceSize zero = 0;
 
@@ -730,12 +787,22 @@ int main(int argc, char **argv)
 			vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, 1,
 						&set2, 0, NULL);
 		}
-		if (!getenv("TRI_NODRAW"))	/* TRI_NODRAW=1: only the clear */
+		/* TRI_NODRAW=1: only the clear; TRI_DEPTH=load draws in a second render */
+		if (!getenv("TRI_NODRAW") && !(depth_mode && !strcmp(depth_mode, "load")))
 			for (int i = 0; i < (getenv("TRI_DRAWS") ? atoi(getenv("TRI_DRAWS")) : 1); i++)
 				vkCmdDraw(cmd, 3,
 					  getenv("TRI_INSTANCES") ? atoi(getenv("TRI_INSTANCES")) : 1,
 					  0, 0);
 		end_rendering(cmd);
+		if (depth_mode && !strcmp(depth_mode, "load")) {
+			datt.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+			att.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+			begin_rendering(cmd, &ri);
+			vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+			vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &zero);
+			vkCmdDraw(cmd, 3, 1, 0, 0);
+			end_rendering(cmd);
+		}
 		if (getenv("TRI_LOAD")) {
 			att.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 			begin_rendering(cmd, &ri);
@@ -810,7 +877,43 @@ int main(int argc, char **argv)
 			for (unsigned i = 0; i < 3; i++)
 				at[i][1] = H - 1 - at[i][1];
 		static const char *names[3] = { "red", "green", "blue" };
-		const int nodraw = getenv("TRI_NODRAW") != NULL;
+		/* TRI_DEPTH=fail: the depth test rejects the triangle */
+		if (dmap) {
+			/* what the depth store wrote: words other than the 0x55 fill */
+			unsigned changed = 0, first = ~0u;
+
+			for (VkDeviceSize i = 0; i < dsize / 4; i++)
+				if (dmap[i] != 0x55555555u) {
+					changed++;
+					if (first == ~0u)
+						first = i;
+				}
+			printf("depth memory: %u of %llu words written", changed,
+			       (unsigned long long)(dsize / 4));
+			if (changed)
+				printf(", first at word %u: %#x", first, dmap[first]);
+			printf("\n");
+			/* TRI_DEPTH_DUMP=1: the written ranges and their values */
+			if (getenv("TRI_DEPTH_DUMP"))
+				for (VkDeviceSize i = 0, n = 0; i < dsize / 4 && n < 24; i++) {
+					VkDeviceSize j = i;
+
+					if (dmap[i] == 0x55555555u)
+						continue;
+					while (j + 1 < dsize / 4 && dmap[j + 1] != 0x55555555u)
+						j++;
+					printf("  words %llu-%llu: %#x .. %#x\n", (unsigned long long)i,
+					       (unsigned long long)j, dmap[i], dmap[j]);
+					i = j;
+					n++;
+				}
+		}
+		if (depth_mode && !strcmp(depth_mode, "loadfirst")) {
+			printf("PASS (completed; the loaded depth is undefined)\n");
+			return 0;
+		}
+		const int nodraw = getenv("TRI_NODRAW") != NULL ||
+				   (depth_mode && strcmp(depth_mode, "pass"));
 		unsigned n_clear = 0, n_other = 0, ok = 1;
 
 		for (unsigned y = 0; y < H; y++)
