@@ -3,14 +3,15 @@
  * Screenshot of what the display scans out: the framebuffer on the first
  * active CRTC of the first KMS card (simpledrm or ADBE on the iPad),
  * whoever set it (a compositor), mapped as a dumb buffer and written as a
- * binary PPM. Root
- * only (the framebuffer's handle needs CAP_SYS_ADMIN). Run in the device
- * chroot while the compositor runs:
+ * binary PPM. Requires CAP_SYS_ADMIN, or an inherited descriptor that is
+ * already the display's DRM master (KMS_GRAB_FD). No mode or framebuffer
+ * ownership is changed. Run while the compositor runs:
  *
  *   kms-grab OUT.ppm [SCALE]    # SCALE: keep every SCALE-th pixel (default 2)
  */
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,9 +29,29 @@ static void die(const char *what)
 	exit(1);
 }
 
+static void close_fb_handles(int fd, const drmModeFB2 *fb)
+{
+	int error = errno;
+
+	/* GETFB2 creates fresh handles; planes may share one. */
+	for (unsigned i = 0; i < sizeof(fb->handles) / sizeof(fb->handles[0]); i++) {
+		unsigned j;
+
+		if (!fb->handles[i])
+			continue;
+		for (j = 0; j < i; j++)
+			if (fb->handles[j] == fb->handles[i])
+				break;
+		if (j == i)
+			drmCloseBufferHandle(fd, fb->handles[i]);
+	}
+	errno = error;
+}
+
 int main(int argc, char **argv)
 {
 	const unsigned scale = argc > 2 ? atoi(argv[2]) : 2;
+	const char *inherited_fd = getenv("KMS_GRAB_FD");
 	int fd = -1;
 	drmModeRes *res = NULL;
 	drmModeFB2 *fb = NULL;
@@ -42,6 +63,21 @@ int main(int argc, char **argv)
 	if (argc < 2 || !scale) {
 		fprintf(stderr, "usage: kms-grab OUT.ppm [SCALE]\n");
 		return 1;
+	}
+	if (inherited_fd) {
+		char *end;
+		long inherited;
+
+		errno = 0;
+		inherited = strtol(inherited_fd, &end, 10);
+		if (errno || !*inherited_fd || *end || inherited < 0 || inherited > INT_MAX) {
+			errno = EINVAL;
+			die("KMS_GRAB_FD");
+		}
+		fd = (int)inherited;
+		res = drmModeGetResources(fd);
+		if (!res)
+			die("drmModeGetResources on inherited descriptor");
 	}
 	/* the first card with KMS: simpledrm's or the ADBE driver's, not the GPU's */
 	for (int n = 0; n < 4 && !res; n++) {
@@ -65,16 +101,20 @@ int main(int argc, char **argv)
 		drmModeFreeCrtc(crtc);
 	}
 	if (!fb || !fb->handles[0])
-		die("no scanned-out framebuffer with a handle (root?)");
+		die("no scanned-out framebuffer handle (DRM master or CAP_SYS_ADMIN required)");
 	if (fb->pixel_format != DRM_FORMAT_XRGB8888 && fb->pixel_format != DRM_FORMAT_ARGB8888) {
 		fprintf(stderr, "format %.4s not handled\n", (const char *)&fb->pixel_format);
+		close_fb_handles(fd, fb);
 		return 1;
 	}
 	map.handle = fb->handles[0];
-	if (drmIoctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &map))
+	if (drmIoctl(fd, DRM_IOCTL_MODE_MAP_DUMB, &map)) {
+		close_fb_handles(fd, fb);
 		die("DRM_IOCTL_MODE_MAP_DUMB");
+	}
 	size = (size_t)fb->pitches[0] * fb->height;
 	px = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, map.offset);
+	close_fb_handles(fd, fb);
 	if (px == MAP_FAILED)
 		die("mmap");
 
@@ -94,5 +134,9 @@ int main(int argc, char **argv)
 	}
 	fclose(out);
 	printf("%ux%u framebuffer %u, written at 1/%u\n", fb->width, fb->height, fb->fb_id, scale);
+	munmap((void *)px, size);
+	drmModeFreeFB2(fb);
+	drmModeFreeResources(res);
+	close(fd);
 	return 0;
 }
