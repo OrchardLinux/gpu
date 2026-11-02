@@ -840,6 +840,14 @@ cheapest); the work here is presenting decoded frames without copies and
 keeping memory down. Hardware video decode (Apple's decoder block) is out of
 scope for the first release, after suspend/resume.
 
+Video phase (`desktop-bench/run-video.sh`, clips from `make-clips.sh`; two
+runs each, 2026-11-03): both renderers play VP9 720p, H.264 720p and VP9
+1080p at 30 fps (1-2% dropped at 720p, none at 1080p), so software decode
+keeps up at 30 fps. Labwc 3.7 s either way; Firefox 58.6-59.1 s on the GPU,
+56.8-56.9 s on pixman; lowest free memory 209-218 MB against 291-322 MB.
+In the GPU session Firefox on llvmpipe instead of Zink saves about 1 s of
+its CPU and 40 MB (two runs each), not the whole gap to pixman.
+
 - **The first cost was uploads:** perf over a scrolling Firefox window put
   15% of all CPU time in the driver's CPU transfer (`copy` in
   `pvr_arch_g9p_transfer.c`), twiddling each window texture texel by texel

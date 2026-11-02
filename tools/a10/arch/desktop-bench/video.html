@@ -1,0 +1,31 @@
+<!doctype html><meta charset="utf-8"><title>video</title>
+<style>body{margin:0;background:#000}video{width:100vw;height:100vh;object-fit:contain}</style>
+<video id="v" muted playsinline></video>
+<script>
+// Plays each clip (?clips=a.webm,b.mp4; default: all three) for 20 s,
+// the way a video site does (muted autoplay, scaled to the window), and
+// POSTs {test, total, dropped, fps, w, h} from getVideoPlaybackQuality().
+const clips = (new URLSearchParams(location.search).get('clips') ||
+               'vp9-720.webm,h264-720.mp4,vp9-1080.webm').split(',');
+const v = document.getElementById('v');
+async function play(clip) {
+  v.src = 'video/' + clip;
+  try { await v.play(); } catch (e) {
+    return { test: 'video ' + clip, error: String(e) };
+  }
+  await new Promise(r => setTimeout(r, 2000));  // past start-up
+  const q0 = v.getVideoPlaybackQuality(), t0 = performance.now();
+  await new Promise(r => setTimeout(r, 20000));
+  const q1 = v.getVideoPlaybackQuality(), s = (performance.now() - t0) / 1000;
+  const total = q1.totalVideoFrames - q0.totalVideoFrames;
+  const dropped = q1.droppedVideoFrames - q0.droppedVideoFrames;
+  v.pause();
+  return { test: 'video ' + clip, total, dropped, fps: (total - dropped) / s,
+           w: v.videoWidth, h: v.videoHeight };
+}
+addEventListener('load', async () => {
+  for (const c of clips)
+    await fetch('/result', { method: 'POST', body: JSON.stringify(await play(c)) });
+  fetch('/result', { method: 'POST', body: JSON.stringify({ test: 'end' }) });
+});
+</script>

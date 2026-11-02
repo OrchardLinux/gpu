@@ -14,3 +14,6 @@ orchard.local.toml
 *.ipsw
 kernelcache*
 *.im4p
+
+# The video phase's clips (desktop-bench/make-clips.sh)
+tools/a10/arch/desktop-bench/video/
