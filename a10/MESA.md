@@ -796,6 +796,44 @@ parameter pool, a third 12 MB swapchain buffer, Zink) and Firefox's own
 CPU, about 3 s more because the session's `MESA_LOADER_DRIVER_OVERRIDE=zink`
 gives it Zink on the GPU instead of llvmpipe.
 
+## Conformance and ES 3 (2026-11-03)
+
+No dEQP or Vulkan CTS run yet. On the A10, Zink offers OpenGL ES 2.0 and
+desktop GL 2.1 (`eglinfo -B`). Mesa's ES 3.0 check (`compute_version_es2`)
+fails only on texture formats the G9P format table does not decode yet:
+float and half-float textures, RG, integer, snorm, RGB9E5, R11G11B10,
+32-bit float depth and RGB10A2UI. Transform feedback, instancing, four
+colour attachments, sRGB and primitive restart are there.
+
+Compiler gaps (the "not supported yet" paths of `g9p_compile.c` and
+`pvr_arch_g9p_gfx.c`): derivatives (the theme and background pickers run on
+llvmpipe because of them), discard inside control flow, some fragment
+inputs and outputs, subpass input loads, register spilling (above 32
+registers), UBOs and dynamic buffers, 16-bit registers, workgroup ID z,
+indirect dispatch and base groups, `firstInstance`, some vertex formats and
+divisors, sampler address modes. No partial renders: a scene that runs out
+of parameter memory hangs the GPU (hence the 32 MiB pool). Quickshell on
+the GPU hung the A10 on 2026-11-02 (cause unknown); the shell stays on
+Qt's software renderer.
+
+## Roadmap (2026-11-03)
+
+1. Ship: memory below pixman (third swapchain buffer, Zink overhead, the
+   pool after 3), which processes get GL on the GPU, push the set, GPU
+   session as the A10 default with fallback to pixman.
+2. Measure: dEQP-GLES2, dEQP-GLES3 through Zink and core dEQP-VK groups on
+   the device; report only what G9P compiles, so applications fall back.
+3. Robustness: partial renders (then a smaller pool), the Quickshell hang,
+   recovery that keeps the session.
+4. Completeness, from 2's failures: texture formats (ES 3.0), derivatives,
+   discard in control flow, render targets, spilling, then UBOs, 16-bit,
+   subpass inputs; compute for ES 3.1.
+5. Performance: compiler quality (about 2x behind Apple's on the Julia
+   effect), cached mappings, fewer ioctls per frame, GPU power states.
+6. Other A-chips (J71t first), with captures per generation.
+7. Upstream: kernel GPU series, udmabuf's last page, wlroots'
+   shared-memory DMA-BUFs.
+
 - **The first cost was uploads:** perf over a scrolling Firefox window put
   15% of all CPU time in the driver's CPU transfer (`copy` in
   `pvr_arch_g9p_transfer.c`), twiddling each window texture texel by texel
