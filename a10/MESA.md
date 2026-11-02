@@ -736,6 +736,15 @@ animation p95/p99 18/21 ms (10 frames > 25 ms, pixman 14), load 1484 ms,
 Firefox RSS peak 754 MB, lowest free memory 255 MB (pixman 374 MB). Still
 behind pixman: Labwc's CPU (about 1.5x) and about 120 MB of memory.
 
+**Where the memory goes** (2026-11-03): the GPU session starts with ~75 MB
+less free memory than pixman. Labwc's own PSS is 26 MB; the difference is
+pinned GPU memory (Shmem/Unevictable 146 MB at idle). One Vulkan device
+pins about 36 MB (vk-tri: +36 MB while it runs), mostly the 32 MiB
+parameter buffer every device allocates (`G9P_FREE_LIST_SIZE`), and Labwc
+holds the render node 7 times (Zink's devices). The A10 firmware runs one
+geometry scene at a time and the kernel serialises them, so one shared
+parameter buffer in the kernel can serve every device: next step.
+
 - **The first cost was uploads:** perf over a scrolling Firefox window put
   15% of all CPU time in the driver's CPU transfer (`copy` in
   `pvr_arch_g9p_transfer.c`), twiddling each window texture texel by texel
