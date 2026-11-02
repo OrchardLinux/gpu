@@ -1040,8 +1040,9 @@ frame on the iPad's screen (simpledrm framebuffer: 1536x2048, stride
 6144 = the linear target's row pitch).
 
 Still to decode from this batch: `rgba8`, `rgba16f`, `blend`, `cull`,
-`depth`, `scissor`, `texfilter`, `texlinear`, `indexed`, `instanced`,
-`fragcoord`, `discard`, `fubo`.
+`depth`, `scissor`, `texfilter`, `texlinear`, `indexed`, `fragcoord`,
+`discard`, `fubo`. (`instanced`: decoded 2026-11-02, MESA.md "Instanced
+draws and the geometry hang".)
 
 ## Textures in Mesa (2026-10-31)
 

@@ -576,7 +576,9 @@ Hardware rules the compiler follows (all tested on the A10, ISA.md):
     submits one job fewer.
 - **Evidence**:
   - `73cb8c5669a`: at the minimum size two draws with their own state, or
-    32 instances, hung.
+    32 instances, hung. (Instanced hangs at any list size turned out to
+    be VDM_STATE5 MAX_INSTANCES: MESA.md "Instanced draws and the
+    geometry hang".)
   - `4ac3eedab44`: at 8 MiB 3000 draws of an eighth of 1536x2048 hung; at
     32 MiB 3000 and 6000 pass.
   - MESA.md "Two hangs, not one".

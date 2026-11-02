@@ -651,9 +651,19 @@ moved below that limit (`pvr_apple_heaps[]`).
 ### 4.4 Teardown and timeouts
 
 - `pvr_apple_timedout_job()` (5 s) logs a hang report, marks the context
-  faulty and returns `DRM_GPU_SCHED_STAT_NO_HANG`. There is **no firmware or
-  GPU reset**. A hung firmware stays hung until reboot, and waiters can sit
-  in state D.
+  faulty and resets the GPU (orchard `937d64d`, `c3fcbfe`): every job in
+  flight ends with -ETIMEDOUT, the firmware shuts down (or, after a crash,
+  RTKit is reinitialized), the GPU goes through Fender state 0, and the
+  firmware restarts from the kept image with fresh init data. The handler
+  wraps the reset in `drm_sched_stop()`/`drm_sched_start()`: the scheduler
+  takes a timed-out job off its pending list and frees it only through
+  them, so without them every hang leaked the client's job, context and
+  buffers (about 35 MB each). The owner of the guilty context sees the
+  device lost (Mesa: `VK_ERROR_DEVICE_LOST`); other clients go on.
+- A hang report names the stamps, submitted jobs, ring and event indices;
+  with `apple_fw_debug=3` (writable, applies from the next reset) it ends
+  with the firmware trace ring's last 24 records (MESA.md "Instanced draws
+  and the geometry hang").
 - `pvr_apple_quiesce()` runs before `pvr_remove()`: wait for idle, signal
   fences, flush `sched_wq` twice (free_job, then the context releases it
   queued).
@@ -683,6 +693,7 @@ moved below that limit (`pvr_apple_heaps[]`).
 | 13 | Geometry hang on very heavy scenes | PM out of memory: the microsequence finalizes an unfinished scene | `apple_pm_trace`: the light scene posts `(1,2)` with 0x445 pages, the heavy one posts nothing | **Open** (partial renders). Stopgap: Mesa's shared free list grown to 32 MiB |
 | 14 | `rmmod` hangs / `WARN_ON(!xa_empty)` | drm_sched self-deadlock; jobs outliving remove | sysrq `w`, `/proc/kmsg` over USB SSH | Deferred release, quiesce |
 | 15 | GPU slow, 2× | Performance state 1 | Power struct fields read 0; DVFS step never runs | `apple_perf_state=6` |
+| 16 | Geometry hang after a fixed number of instanced renders (glmark2 `shading`, `build`) | VDM_STATE5 MAX_INSTANCES 0 (32 per vertex task) with a 14-register vertex shader | Heap/window dumps per batch, RGX reads during the stall (GPU idle), firmware trace (StartTA, no TA_FINISHED), iPadOS capture of 1000 instances x 100, then pvr-tri with Mesa's VDM_STATE5 | Mesa caps instances per task (MESA.md) |
 
 Notes on #11 and #13: MESA.md first attributed the Hyprland hang to a
 parameter-memory leak ("The hang is a parameter-memory leak"). A later
@@ -726,8 +737,9 @@ section must be found again in the A9 firmware.
 
 ## Open questions
 
-1. Hang recovery: no firmware or GPU reset after a timeout. A malformed PDS
-   program from userspace wedges the GPU until reboot.
+1. Hang recovery: done (4.4). A hung job costs a 5 s timeout and a
+   firmware restart; what the firmware still cannot survive without one
+   (a malformed PDS program, a scene that outgrows the free list) remains.
 2. Partial renders on PM out-of-memory (#13). iPadOS presumably uses the
    kext's `encodePartialRenderSetup`. Fragment partial-render jobs return
    `-EOPNOTSUPP`.
