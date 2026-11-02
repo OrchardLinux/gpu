@@ -818,6 +818,22 @@ Tools: `perf probe -x /usr/lib/libvulkan_powervr_mesa.so 'pvrbo=0x<offset of
 pvr_drm_winsys_buffer_create> size=%x1:u64'` with `--filter
 'size==12582912' --call-graph dwarf` (the kernel has uprobes, no kprobes).
 
+Clean rerun (2026-11-03 late; no orphaned rotation helpers, Mesa
+`73a49abe247` without the SPM scratch buffer), three runs each:
+
+| | GPU | pixman |
+|---|---|---|
+| foot 20 s: Labwc CPU, lines | 1.0 s, 3.71-3.82 M | 1.1 s, 3.31-3.47 M |
+| Firefox phase: Labwc CPU | 2.5-2.6 s | 3.4-3.5 s |
+| Labwc RSS | 27 MB | 37-50 MB |
+| Firefox's own CPU | 54.9-55.1 s | 52.8-53.1 s |
+| Free after login | 1071-1177 MB | 1201-1226 MB |
+| Firefox: lowest free | 271-312 MB | 312-362 MB |
+
+The gap at the low point is down to about 50 MB (90 MB before). Left: the
+32 MiB parameter pool (needs partial renders), the readiness check's read-
+back (12 MB) and about 6 MB of Zink and Mesa buffers.
+
 ## Zero-copy shared memory: the recipe (for any compositor)
 
 Clients that draw on the CPU (foot, Qt Quick software, GTK, Firefox's
