@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>load</title>
+<style>body{font:14px sans-serif}.g{display:grid;grid-template-columns:repeat(6,1fr);gap:8px}
+.c{border:1px solid #ccc;border-radius:8px;padding:8px}canvas{width:100%;height:60px}</style>
+<div class="g" id="g"></div><script src="probe.js"></script><script>
+// A dashboard-like page: 600 cards, each with text and a small canvas chart; the load time and 5 s of frames
+const g = document.getElementById('g');
+for (let i = 0; i < 600; i++) {
+  const c = document.createElement('div');
+  c.className = 'c';
+  c.innerHTML = `<b>Item ${i}</b><br>value ${(i * 37) % 1000}<canvas width="160" height="60"></canvas>`;
+  g.appendChild(c);
+  const x = c.querySelector('canvas').getContext('2d');
+  x.strokeStyle = `hsl(${i},60%,40%)`;
+  x.beginPath();
+  for (let k = 0; k < 40; k++) x.lineTo(k * 4, 30 + 25 * Math.sin((i + k) / 5));
+  x.stroke();
+}
+addEventListener('load', () => setTimeout(() => probe('load', 5), 200));
+</script>

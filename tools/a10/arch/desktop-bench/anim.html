@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><title>anim</title>
+<style>body{margin:0;background:#eee;overflow:hidden}
+.b{position:absolute;width:120px;height:80px;border-radius:12px;box-shadow:0 4px 12px rgba(0,0,0,.3);
+   animation:m 3s ease-in-out infinite alternate;opacity:.9}
+@keyframes m{from{transform:translate(0,0) rotate(0)}to{transform:translate(600px,300px) rotate(180deg)}}</style>
+<script src="probe.js"></script><script>
+// UI-like motion: 60 animated cards (transform, opacity, shadow), 20 s
+addEventListener('load', () => {
+  for (let i = 0; i < 60; i++) {
+    const d = document.createElement('div');
+    d.className = 'b';
+    d.style.left = (i % 10) * 140 + 'px';
+    d.style.top = Math.floor(i / 10) * 110 + 'px';
+    d.style.background = `hsl(${i * 6},70%,55%)`;
+    d.style.animationDelay = -(i * 0.05) + 's';
+    document.body.appendChild(d);
+  }
+  setTimeout(() => probe('anim', 20), 1000);
+});
+</script>

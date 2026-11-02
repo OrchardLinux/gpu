@@ -1,0 +1,13 @@
+<!doctype html><meta charset="utf-8"><title>scroll</title>
+<style>body{font:16px/1.5 sans-serif;margin:24px;max-width:900px}h2{color:#246}p{margin:0 0 12px}</style>
+<div id="c"></div><script src="probe.js"></script><script>
+// A long article: 400 sections of headings and paragraphs, scrolled 6 px a frame for 20 s
+const words = 'lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt ut labore et dolore magna aliqua'.split(' ');
+let h = '';
+for (let i = 0; i < 400; i++) {
+  h += `<h2>Section ${i}</h2>`;
+  for (let k = 0; k < 3; k++) h += '<p>' + Array.from({length: 60}, (_, j) => words[(i * 7 + k * 13 + j) % words.length]).join(' ') + '</p>';
+}
+document.getElementById('c').innerHTML = h;
+addEventListener('load', () => setTimeout(() => probe('scroll', 20, () => scrollBy(0, 6)), 1000));
+</script>

@@ -709,3 +709,39 @@ grabs is its box still growing: correct.
   records. A good geometry job: `0x111` dispatch, `0x102`/`0x103`, `0x000`
   StartTA, `0x112`, event `0x102` (group 3, mask 0x80000000, events 0x20 =
   TA_FINISHED), `0x001` FinalizeTA. The stalled one ends in `0x113 (1, 2)`.
+
+## The GPU desktop against pixman (2026-11-02)
+
+`tools/a10/arch/desktop-bench/run.sh`, run over SSH as the session user in
+a logged-in Omarchy A session, runs one workload on whichever renderer
+Labwc uses: 20 s idle, foot printing for 20 s, then Firefox on a fresh
+profile loading a dashboard page (600 cards with canvas charts), scrolling a
+long article and animating 60 cards, 20 s each. In-page
+`requestAnimationFrame` probes post frame times to a local collector. The
+pixman pass moves the Vulkan ICD aside so the login session falls back.
+
+| | GPU (`93544a9772e`) | GPU, linear images (`6a47d530a13`) | pixman |
+|---|---|---|---|
+| foot 20 s: Labwc CPU, lines | 5.1 s, 4.03 M | 3.4 s, 3.86 M | 1.1 s, 3.26 M |
+| Firefox load | 1654 ms, p99 128 ms | 1414 ms, p99 112 ms | 1437 ms, p99 51 ms |
+| Scroll: p95 / p99, frames > 25 ms | 27 / 38 ms, 63 | 19 / 26 ms, 12 | 18 / 19 ms, 3 |
+| Animation: p95, frames > 25 ms | 25 ms, 53 | 22 ms, 32 | 19 ms, 14 |
+| Firefox phase: Labwc CPU | 13.3 s | 9.0 s | 3.2 s |
+| Lowest free memory (from ~1.1 GB) | 180 MB | 138 MB | 374 MB |
+
+- **The first cost was uploads:** perf over a scrolling Firefox window put
+  15% of all CPU time in the driver's CPU transfer (`copy` in
+  `pvr_arch_g9p_transfer.c`), twiddling each window texture texel by texel
+  as Zink uploads it. Single-level 2D colour images are now linear on G9P,
+  so an upload is a row `memcpy`.
+- **Cached CPU mappings change little:** a module parameter mapping userspace
+  buffers cached (experiment, not committed) passed every coherence check
+  (suite x3, compute, pvr-tri, 300 texture uploads) but moved Labwc only
+  from 13.3 s to 12.7 s.
+- **Still behind pixman:** Labwc's CPU (about 3x) and memory (about 240 MB
+  more at the low point; a run with 390 MB of test leftovers in `/tmp`, which
+  is RAM, hit the OOM killer). Next: profile the remaining Labwc time and
+  account the extra memory per process.
+- vk-tri reads its target back through `vkCmdCopyImageToBuffer` and uploads
+  its texture through `vkCmdCopyBufferToImage`: an optimal image's layout is
+  the driver's to choose.

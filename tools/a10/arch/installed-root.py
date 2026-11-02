@@ -55,9 +55,13 @@ fi
 
 
 def install(src, dst, mode):
+    """A new file renamed over the old one: a running compositor keeps the
+    driver it mapped (copying over it in place crashed Labwc, 2026-11-02)."""
     os.makedirs(os.path.dirname(dst), mode=0o755, exist_ok=True)
-    shutil.copyfile(src, dst)
-    os.chmod(dst, mode)
+    temporary = dst + '.new'
+    shutil.copyfile(src, temporary)
+    os.chmod(temporary, mode)
+    os.replace(temporary, dst)
     os.remove(src)
     print('installed', dst)
 

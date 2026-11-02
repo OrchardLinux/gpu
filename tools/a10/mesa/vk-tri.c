@@ -2,9 +2,9 @@
 /*
  * Vulkan render test: a triangle with per-vertex colours into a B8G8R8A8
  * image (64x64, TRI_SIZE=WxH) with dynamic rendering, cleared to TRI_CLEAR
- * (default dark blue). The image memory is mapped and read twiddled (Morton
- * order, y bit first, over the power-of-two padded size: how the A10 stores
- * render targets) or, with TRI_LINEAR=1, linear at the driver's row pitch,
+ * (default dark blue). The image is read back through vkCmdCopyImageToBuffer
+ * (its optimal layout is the driver's), or with TRI_LINEAR=1 mapped directly
+ * at the driver's row pitch,
  * then checked: the clear colour outside the triangle, red/green/blue near
  * its corners. TRI_NODRAW=1 renders the clear only. TRI_FB=/dev/fb0 copies
  * the result row by row to a framebuffer device (the iPad's screen with
@@ -127,6 +127,17 @@ static VkDeviceMemory alloc_bind(VkMemoryRequirements req, void **map)
 
 static VkShaderModule module(const uint32_t *code, size_t size);
 
+/* All writes before it visible to all accesses after it */
+static void memory_barrier(VkCommandBuffer cmd)
+{
+	VkMemoryBarrier b = { .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
+			      .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
+			      .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT };
+
+	vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+			     VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &b, 0, NULL, 0, NULL);
+}
+
 /* A shader module from a SPIR-V file */
 static VkShaderModule module_file(const char *path)
 {
@@ -156,45 +167,20 @@ static VkShaderModule module(const uint32_t *code, size_t size)
 	return m;
 }
 
-static unsigned pow2(unsigned v)
-{
-	unsigned p = 1;
-
-	while (p < v)
-		p <<= 1;
-	return p;
-}
-
-/*
- * Twiddled index over the power-of-two padded size: x and y bits
- * interleaved (y first) while both have bits, then the longer side's
- */
-static unsigned twiddle_wh(unsigned x, unsigned y, unsigned w, unsigned h)
-{
-	unsigned pw = pow2(w), ph = pow2(h), m = 0, bit = 0;
-
-	for (unsigned i = 0; (1u << i) < pw || (1u << i) < ph; i++) {
-		if ((1u << i) < ph)
-			m |= ((y >> i) & 1) << bit++;
-		if ((1u << i) < pw)
-			m |= ((x >> i) & 1) << bit++;
-	}
-	return m;
-}
-
-static unsigned twiddle(unsigned x, unsigned y)
-{
-	return twiddle_wh(x, y, W, H);
-}
-
 static int linear_tiling;
 static VkDeviceSize row_pitch;
+/* Optimal targets: read back into this buffer; optimal textures: uploaded from tex_staging */
+static VkBuffer readback, tex_staging;
+static void *readback_map;
+static VkImage tex_image;
+static unsigned tex_w, tex_h;
 
+/* The target's pixel: mapped at the row pitch (linear) or from the readback buffer (W x H) */
 static uint32_t pixel(const uint32_t *px, unsigned x, unsigned y)
 {
 	if (linear_tiling)
 		return px[y * (row_pitch / 4) + x];
-	return px[twiddle(x, y)];
+	return px[y * W + x];
 }
 
 int main(int argc, char **argv)
@@ -344,7 +330,7 @@ int main(int argc, char **argv)
 			.arrayLayers = 1,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.tiling = linear_tiling ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL,
-			.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+			.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
 		};
 
 		CHECK(vkCreateImage(dev, &ci, NULL, &image));
@@ -352,6 +338,17 @@ int main(int argc, char **argv)
 		image_mem = alloc_bind(req, &image_map);
 		CHECK(vkBindImageMemory(dev, image, image_mem, 0));
 		memset(image_map, 0x55, req.size);
+		if (!linear_tiling) {
+			VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+						   .size = (VkDeviceSize)W * H * 4,
+						   .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT };
+			VkMemoryRequirements rreq;
+
+			CHECK(vkCreateBuffer(dev, &bci, NULL, &readback));
+			vkGetBufferMemoryRequirements(dev, readback, &rreq);
+			CHECK(vkBindBufferMemory(dev, readback, alloc_bind(rreq, &readback_map), 0));
+			memset(readback_map, 0x55, bci.size);
+		}
 		if (linear_tiling) {
 			VkImageSubresource sub = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0 };
 			VkSubresourceLayout l;
@@ -429,7 +426,7 @@ int main(int argc, char **argv)
 			.arrayLayers = 1,
 			.samples = VK_SAMPLE_COUNT_1_BIT,
 			.tiling = lin ? VK_IMAGE_TILING_LINEAR : VK_IMAGE_TILING_OPTIMAL,
-			.usage = VK_IMAGE_USAGE_SAMPLED_BIT,
+			.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
 		};
 		VkImage timg;
 		VkImageView tview;
@@ -480,6 +477,20 @@ int main(int argc, char **argv)
 
 			vkGetImageSubresourceLayout(dev, timg, &sub, &l);
 			pitch = l.rowPitch;
+		} else {
+			/* optimal: texels go to a staging buffer, copied in before the render */
+			VkBufferCreateInfo bci = { .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+						   .size = (VkDeviceSize)tw * th * 4,
+						   .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT };
+			VkMemoryRequirements sreq;
+
+			CHECK(vkCreateBuffer(dev, &bci, NULL, &tex_staging));
+			vkGetBufferMemoryRequirements(dev, tex_staging, &sreq);
+			CHECK(vkBindBufferMemory(dev, tex_staging, alloc_bind(sreq, &tmap), 0));
+			pitch = 4 * tw;
+			tex_image = timg;
+			tex_w = tw;
+			tex_h = th;
 		}
 		for (unsigned y = 0; y < th; y++)
 			for (unsigned x = 0; x < tw; x++) {
@@ -488,10 +499,7 @@ int main(int argc, char **argv)
 							       (y * 255 / (th - 1)) << 8
 						     : 0xff000080u | (x * 0x40) << 16 | (y * 0x40) << 8;
 
-				if (lin)
-					memcpy((uint8_t *)tmap + y * pitch + 4 * x, &v, 4);
-				else
-					((uint32_t *)tmap)[twiddle_wh(x, y, tw, th)] = v;
+				memcpy((uint8_t *)tmap + y * pitch + 4 * x, &v, 4);
 			}
 		vci.image = timg;
 		CHECK(vkCreateImageView(dev, &vci, NULL, &tview));
@@ -728,6 +736,13 @@ int main(int argc, char **argv)
 		ai.commandPool = pool;
 		CHECK(vkAllocateCommandBuffers(dev, &ai, &cmd));
 		CHECK(vkBeginCommandBuffer(cmd, &bi));
+		if (tex_staging) {
+			VkBufferImageCopy r = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+						.imageExtent = { tex_w, tex_h, 1 } };
+
+			vkCmdCopyBufferToImage(cmd, tex_staging, tex_image, VK_IMAGE_LAYOUT_GENERAL, 1, &r);
+			memory_barrier(cmd);
+		}
 		for (int p = 0; p < (getenv("TRI_PRE") ? atoi(getenv("TRI_PRE")) : 0); p++) {
 			VkImageCreateInfo ici = {
 				.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -825,6 +840,13 @@ int main(int argc, char **argv)
 				memcpy(clear, c3, sizeof(c3));
 			}
 		}
+		if (readback) {
+			VkBufferImageCopy r = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+						.imageExtent = { W, H, 1 } };
+
+			memory_barrier(cmd);
+			vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_GENERAL, readback, 1, &r);
+		}
 		CHECK(vkEndCommandBuffer(cmd));
 	}
 	{
@@ -863,7 +885,7 @@ int main(int argc, char **argv)
 	}
 
 	{
-		const uint32_t *px = image_map;
+		const uint32_t *px = readback ? readback_map : image_map;
 		const uint32_t want_clear = (uint32_t)(clear[3] * 255 + 0.5f) << 24 |
 					    (uint32_t)(clear[0] * 255 + 0.5f) << 16 |
 					    (uint32_t)(clear[1] * 255 + 0.5f) << 8 |
