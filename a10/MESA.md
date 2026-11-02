@@ -811,9 +811,9 @@ frame with `grim -t ppm /dev/null` (found with `sched:sched_process_exec`
 during login: greetd → login-session → labwc → qs → omarchy-desktop-ready
 → grim, and a wlroots build with symbols: `gles2_texture_read_pixels` ←
 `wlr_ext_image_copy_capture_frame_v1_copy_buffer`). Pixman reads memory
-directly and pays nothing. Fix belongs in the check (attest the frame
-without reading a whole one back, e.g. presentation feedback), an
-omarchy-a decision. About 6 MB of Zink and Mesa buffers remain. A bare Zink client (eglinfo) allocates 2.5 MB.
+directly and pays nothing. Already gone in omarchy-a main (`1b72e68`,
+2026-11-02: readiness is the shell reporting in, the installer waits for
+the PIN screen); the J71b's install predates it. About 6 MB of Zink and Mesa buffers remain. A bare Zink client (eglinfo) allocates 2.5 MB.
 Tools: `perf probe -x /usr/lib/libvulkan_powervr_mesa.so 'pvrbo=0x<offset of
 pvr_drm_winsys_buffer_create> size=%x1:u64'` with `--filter
 'size==12582912' --call-graph dwarf` (the kernel has uprobes, no kprobes).
@@ -831,8 +831,9 @@ Clean rerun (2026-11-03 late; no orphaned rotation helpers, Mesa
 | Firefox: lowest free | 271-312 MB | 312-362 MB |
 
 The gap at the low point is down to about 50 MB (90 MB before). Left: the
-32 MiB parameter pool (needs partial renders), the readiness check's read-
-back (12 MB) and about 6 MB of Zink and Mesa buffers.
+32 MiB parameter pool (needs partial renders) and about 6 MB of Zink and
+Mesa buffers; the readiness check's 12 MB read-back goes with the next
+install (omarchy-a `1b72e68`).
 
 ## Zero-copy shared memory: the recipe (for any compositor)
 
