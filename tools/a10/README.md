@@ -62,6 +62,34 @@ podman run --rm -v PATH/TO/mesa:/mesa localhost/orchard-mesa-g9p:sid sh -c '
 
 `/run` is RAM: run `setup-device.sh` after every boot.
 
+## Capture the current scanout
+
+`out/kms-grab OUT.ppm [SCALE]` captures the first active primary framebuffer
+on the first KMS card. The tool keeps every SCALE-th pixel. The default is 2.
+The PPM uses the physical framebuffer orientation, not the desktop's
+logical rotation. Build the tool with `mesa/build-gl-tests.sh`.
+
+A new KMS descriptor normally needs CAP_SYS_ADMIN to obtain framebuffer
+handles. A launcher can instead give the child an existing DRM-master
+descriptor. Set `KMS_GRAB_FD` to the descriptor number:
+
+```sh
+KMS_GRAB_FD=3 out/kms-grab OUT.ppm 2
+```
+
+The child must inherit FD 3 before it starts. A descriptor number from
+another process is not sufficient. The tool does not acquire DRM master.
+The tool does not change modes, unlock a session or bypass access policy.
+Capture only an unlocked session that you intend to inspect.
+
+The descriptor must belong to the display controller, not the GPU render
+node. If `KMS_GRAB_FD` is invalid, the tool returns an error. The tool does
+not open other cards.
+
+The tool releases each distinct handle that GETFB2 creates. This includes
+handles for unsupported multi-plane formats. The tool closes shared plane
+handles only once. The output supports only XRGB8888 and ARGB8888.
+
 ## What is here
 
 | Path | What |
