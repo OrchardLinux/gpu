@@ -17,7 +17,7 @@ podman run --rm -v "$MESA:/mesa" -v "$OUT:/out" localhost/orchard-gpu-alarm-buil
         -Dplatforms=wayland -Dvulkan-drivers=imagination -Dgallium-drivers= \
         -Dopengl=false -Degl=disabled -Dgbm=disabled -Dglx=disabled -Dgles1=disabled \
         -Dgles2=disabled -Dllvm=enabled -Dvideo-codecs= -Dtools= -Dvulkan-layers= >/dev/null
-    ninja -C build-alarm >/dev/null
+    ninja -C build-alarm > /tmp/ninja.log || { tail -40 /tmp/ninja.log; exit 1; }
     strip --strip-unneeded -o /out/libvulkan_powervr_mesa.so \
         build-alarm/src/imagination/vulkan/libvulkan_powervr_mesa.so
     sed "s#\"library_path\": \"[^\"]*\"#\"library_path\": \"/usr/lib/libvulkan_powervr_mesa.so\"#" \
