@@ -796,6 +796,24 @@ parameter pool, a third 12 MB swapchain buffer, Zink) and Firefox's own
 CPU, about 3 s more because the session's `MESA_LOADER_DRIVER_OVERRIDE=zink`
 gives it Zink on the GPU instead of llvmpipe.
 
+**Where the GPU session's memory goes** (2026-11-03, a temporary powervr
+build logging every buffer of 256 KiB or more, plus fdinfo): at the
+greeter (no GPU client) 18 MB unevictable, in an idle Labwc session 108 MB.
+The difference: the kernel's 32 MiB parameter pool; the two 12 MB
+swapchain buffers (GBM on the display node, LINEAR, exported to the
+display: pixman has those too); a 12 MB GPU-only buffer, the SPM scratch
+buffer every render state allocates at framebuffer size, unused on G9P
+and gone with fork `73a49abe247`; another 12 MB CPU-mappable buffer
+created once on Labwc's first output commit, right before the swapchain
+buffers, never a display framebuffer, origin not found yet (the installed
+wlroots has only exported symbols, so perf attributed it to the nearest
+export, `wlr_ext_image_copy_capture_frame_v1_copy_buffer`, although no
+client captured: a wlroots build with symbols will tell); about 6 MB of
+Zink and Mesa buffers. A bare Zink client (eglinfo) allocates 2.5 MB.
+Tools: `perf probe -x /usr/lib/libvulkan_powervr_mesa.so 'pvrbo=0x<offset of
+pvr_drm_winsys_buffer_create> size=%x1:u64'` with `--filter
+'size==12582912' --call-graph dwarf` (the kernel has uprobes, no kprobes).
+
 ## Zero-copy shared memory: the recipe (for any compositor)
 
 Clients that draw on the CPU (foot, Qt Quick software, GTK, Firefox's
