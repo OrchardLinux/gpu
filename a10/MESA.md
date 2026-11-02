@@ -771,6 +771,31 @@ up. The GPU session still pins about 50 MB more shared memory from login on
 (70-80 MB less free) and Labwc spends 1.5-2x pixman's CPU. Those two are
 what is left before the GPU desktop beats pixman.
 
+**Zero-copy shared memory** (2026-11-03): the copy into textures was the
+CPU gap (perf: `memcpy` 45% of Labwc while foot prints, 54% while Firefox
+runs). omarchy-a's wlroots (patch 0002) turns each shared-memory buffer of
+a sealed memfd into a DMA-BUF of its pages with udmabuf (orchard kernel
+`CONFIG_UDMABUF=y`, plus `drivers/dma-buf/0001` for a buffer that ends in
+the file's last 16 KiB page, which is most of Firefox's), and the GLES2
+renderer imports it; Mesa imports a linear plane at an offset (fork
+`2d2e29774ee`). Earlier the same day, render-target datasets are reused
+across dynamic-rendering passes (fork `7c16226c9b4`): the kernel share of
+Labwc's time fell from 19% to 12%.
+
+| Three runs each | GPU | pixman |
+|---|---|---|
+| foot 20 s: Labwc CPU, lines | 1.0 s, 3.48-3.69 M | 1.1 s, 3.22-3.26 M |
+| Firefox phase: Labwc CPU | 2.5 s | 3.4-3.5 s |
+| Labwc RSS | 27 MB | 37-49 MB |
+| Free after login | 1082-1096 MB | 1148-1183 MB |
+| Firefox: lowest free | 251-318 MB | 356-370 MB |
+| Firefox's own CPU | 54.9-55.0 s | 51.5-52.8 s |
+
+Labwc now beats pixman; frame rates are level. Open: memory (the 32 MiB
+parameter pool, a third 12 MB swapchain buffer, Zink) and Firefox's own
+CPU, about 3 s more because the session's `MESA_LOADER_DRIVER_OVERRIDE=zink`
+gives it Zink on the GPU instead of llvmpipe.
+
 - **The first cost was uploads:** perf over a scrolling Firefox window put
   15% of all CPU time in the driver's CPU transfer (`copy` in
   `pvr_arch_g9p_transfer.c`), twiddling each window texture texel by texel
