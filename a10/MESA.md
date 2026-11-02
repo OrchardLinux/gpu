@@ -796,6 +796,53 @@ parameter pool, a third 12 MB swapchain buffer, Zink) and Firefox's own
 CPU, about 3 s more because the session's `MESA_LOADER_DRIVER_OVERRIDE=zink`
 gives it Zink on the GPU instead of llvmpipe.
 
+## Zero-copy shared memory: the recipe (for any compositor)
+
+Clients that draw on the CPU (foot, Qt Quick software, GTK, Firefox's
+software WebRender) hand the compositor `wl_shm` buffers. A GPU compositor
+normally uploads each into a texture: a copy per frame (the main CPU cost
+here) and a second copy of every surface in GPU memory. Instead:
+
+1. **Kernel** (orchard): `CONFIG_UDMABUF=y` (a bool), and
+   `kernel/patches/drivers/dma-buf/0001`: udmabuf takes a memfd's last,
+   partial page. With 16 KiB pages most buffers end inside one; upstream
+   udmabuf refuses that range (EINVAL). `/dev/udmabuf` is tagged `uaccess`
+   by systemd, so the logged-in user can open it.
+2. **Mesa** (fork): import a linear DMA-BUF whose plane starts inside the
+   memory (`2d2e29774ee`; the plane offset is the buffer's offset within its
+   first page) and fail an unsupported import cleanly instead of asserting.
+   Row pitch: G9P wants 64-byte multiples (16 pixels of XRGB8888), which
+   full-width windows meet; others fail the import and are copied.
+3. **Compositor**, per `wl_shm` buffer, on first use:
+   - only if the pool's fd is a memfd sealed with `F_SEAL_SHRINK` (Qt, GTK,
+     foot and Firefox do; GTK's own `gdk-wayland` pool is not, it gets
+     copied);
+   - `UDMABUF_CREATE` over the buffer's own pages only (offset rounded down,
+     end rounded up to the page size): a pool can be large and sparse (foot
+     reserves one to scroll in) and udmabuf pins everything it covers. A
+     whole-pool udmabuf pinned 1 GB for one foot window here;
+   - describe the buffer as a one-plane LINEAR DMA-BUF (`offset` = its offset
+     in the first page, `stride` as the client gave it) and import it like a
+     client DMA-BUF (EGLImage);
+   - keep the buffer locked while a texture samples it, as for DMA-BUF
+     clients: do not release it after "uploading";
+   - close the udmabuf when the buffer is destroyed;
+   - if the import fails, copy as before (and stop trying for a while).
+
+   wlroots: omarchy-a `desktop/packages/wlroots0.20/0002` (in
+   `types/wlr_shm.c` the buffer gets `get_dmabuf`; the GLES2 renderer
+   already prefers DMA-BUFs and gains the fallback). **Hyprland** does not
+   use wlroots' buffer code: the same steps belong where Aquamarine/Hyprland
+   turn a `wl_shm` buffer into a texture (its shm buffer type's dmabuf
+   attributes, or the renderer's shm texture path).
+4. **Coherence**: the A10 GPU sees what the CPU wrote to cached memory
+   (apple_cpu_cached experiment: 300 texture uploads and the suite without
+   cache maintenance). On a GPU without that, the compositor would need a
+   `DMA_BUF_IOCTL_SYNC` per commit, which costs about as much as the copy.
+
+Measure with fdinfo (`drm-shared-memory` counts the imports, which are the
+clients' own pages) and `ls -l /proc/<compositor>/fd | grep dmabuf`.
+
 ## Conformance and ES 3 (2026-11-03)
 
 No dEQP or Vulkan CTS run yet. On the A10, Zink offers OpenGL ES 2.0 and
