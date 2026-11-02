@@ -745,6 +745,13 @@ holds the render node 7 times (Zink's devices). The A10 firmware runs one
 geometry scene at a time and the kernel serialises them, so one shared
 parameter buffer in the kernel can serve every device: next step.
 
+Shared pool (kernel `pvr_apple_pm_pages()`, worktree commit `d943f57`): every
+device made two free lists (Mesa's global one, created first, and the 32 MiB
+G9P list), now both hand out pages of one 32 MiB pool. A second Vulkan device
+pins 2 MB instead of 36. Benchmark: the session starts with 1158 MB free
+(pixman 1154), shared memory during Firefox +175 MB (pixman +205); lowest free
+memory 223 MB (pixman 374, from a start 110 MB lower: one run each, to repeat).
+
 - **The first cost was uploads:** perf over a scrolling Firefox window put
   15% of all CPU time in the driver's CPU transfer (`copy` in
   `pvr_arch_g9p_transfer.c`), twiddling each window texture texel by texel
