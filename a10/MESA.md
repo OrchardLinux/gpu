@@ -729,6 +729,13 @@ pixman pass moves the Vulkan ICD aside so the login session falls back.
 | Firefox phase: Labwc CPU | 13.3 s | 9.0 s | 3.2 s |
 | Lowest free memory (from ~1.1 GB) | 180 MB | 138 MB | 374 MB |
 
+With `VK_EXT_host_image_copy` (`6ccd31a3e03`, 2026-11-03; Zink uploads window
+contents straight into the image, no staging buffer): foot 20 s Labwc 2.2 s,
+Firefox phase Labwc 4.9 s, scroll p95/p99 18/26 ms (12 frames > 25 ms),
+animation p95/p99 18/21 ms (10 frames > 25 ms, pixman 14), load 1484 ms,
+Firefox RSS peak 754 MB, lowest free memory 255 MB (pixman 374 MB). Still
+behind pixman: Labwc's CPU (about 1.5x) and about 120 MB of memory.
+
 - **The first cost was uploads:** perf over a scrolling Firefox window put
   15% of all CPU time in the driver's CPU transfer (`copy` in
   `pvr_arch_g9p_transfer.c`), twiddling each window texture texel by texel
