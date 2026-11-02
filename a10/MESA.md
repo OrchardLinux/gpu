@@ -752,6 +752,25 @@ pins 2 MB instead of 36. Benchmark: the session starts with 1158 MB free
 (pixman 1154), shared memory during Firefox +175 MB (pixman +205); lowest free
 memory 223 MB (pixman 374, from a start 110 MB lower: one run each, to repeat).
 
+Three alternating runs each (2026-11-03, orchard main `b5cbeed` kernel with
+the shared pool, Mesa `6ccd31a3e03`; the loop logs in through a uinput
+keyboard, so every run starts from a fresh session):
+
+| | GPU (gles2) | pixman |
+|---|---|---|
+| Free after login | 1080-1141 MB | 1155-1213 MB |
+| Shmem at idle | 126-129 MB | 72-82 MB |
+| foot 20 s: lines, Labwc CPU | 3.83 M, 2.2-2.3 s | 3.30 M, 1.1 s |
+| Firefox phase: Labwc CPU | 4.8-5.1 s | 3.3 s |
+| Firefox: shmem growth | +181 to +202 MB | +176 to +185 MB |
+| Firefox: lowest free memory | 193-276 MB | 248-320 MB |
+| Load / scroll / animation fps | 52-54 / 59.5 / 57-59 | 52-55 / 59-60 / 56-58 |
+
+Frame rates are level; the one-run "same free memory at start" did not hold
+up. The GPU session still pins about 50 MB more shared memory from login on
+(70-80 MB less free) and Labwc spends 1.5-2x pixman's CPU. Those two are
+what is left before the GPU desktop beats pixman.
+
 - **The first cost was uploads:** perf over a scrolling Firefox window put
   15% of all CPU time in the driver's CPU transfer (`copy` in
   `pvr_arch_g9p_transfer.c`), twiddling each window texture texel by texel
