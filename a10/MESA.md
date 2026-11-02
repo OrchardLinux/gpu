@@ -834,6 +834,12 @@ Qt's software renderer.
 7. Upstream: kernel GPU series, udmabuf's last page, wlroots'
    shared-memory DMA-BUFs.
 
+The user's yardstick: YouTube in Firefox loads, renders and plays
+smoothly. Video is decoded in software (720p is the realistic target, H.264
+cheapest); the work here is presenting decoded frames without copies and
+keeping memory down. Hardware video decode (Apple's decoder block) is out of
+scope for the first release, after suspend/resume.
+
 - **The first cost was uploads:** perf over a scrolling Firefox window put
   15% of all CPU time in the driver's CPU transfer (`copy` in
   `pvr_arch_g9p_transfer.c`), twiddling each window texture texel by texel
