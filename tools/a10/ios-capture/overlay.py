@@ -77,7 +77,7 @@ if __name__ == '__main__':
               'after a few seconds, disconnect and reconnect the cable once.', flush=True)
         with log.open('wb') as out:
             subprocess.run([info['path'], '-p'], stdout=out, stderr=subprocess.STDOUT, timeout=120)
-        orchard = HERE.parents[2] / 'orchard'
+        orchard = shutil.which('orchard') or sys.exit('orchard is not on PATH')
         deadline = time.monotonic() + 120
         while '"mode": "pongo"' not in subprocess.run([orchard, 'devices'], capture_output=True,
                                                       text=True).stdout:

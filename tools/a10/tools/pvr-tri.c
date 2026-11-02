@@ -37,6 +37,8 @@
  *   TRI_NODRAW=1       no INDEX_LIST (a render of the clear only)
  *   TRI_ISP_CTL=HEX    fragment ISP_CTL (default 0x21000f); TRI_TE_PSG=HEX
  *                      geometry TE_PSG (default 0x20000)
+ *   TRI_INSTANCES=N    the draw as N instances (one triangle each, all alike)
+ *   TRI_REPEAT=N       submit the render N more times, each waited for (2 s)
  */
 #include <errno.h>
 #include <fcntl.h>
@@ -688,7 +690,7 @@ static void build_stream(uint8_t *data, uint64_t base)
 	if (!getenv("TRI_NODRAW")) {
 		vdm(0x6e440600);
 		vdm(3);
-		vdm(0);
+		vdm(getenv("TRI_INSTANCES") ? atoi(getenv("TRI_INSTANCES")) - 1 : 0);
 		vdm(0);
 		vdm(0xaa);
 	}
@@ -1020,6 +1022,37 @@ int main(int argc, char **argv)
 	expect_tri = (uint32_t)(col[3] * 255 + 0.5f) << 24 | (uint32_t)(col[0] * 255 + 0.5f) << 16 |
 		     (uint32_t)(col[1] * 255 + 0.5f) << 8 | (uint32_t)(col[2] * 255 + 0.5f);
 	clock_gettime(CLOCK_MONOTONIC, &t0);
+	if (getenv("TRI_REPEAT")) {
+		/* each submit signals a syncobj from its fragment job; wait for it */
+		struct drm_syncobj_create create = { 0 };
+		struct drm_pvr_sync_op signal = { 0 };
+		int r, n = atoi(getenv("TRI_REPEAT"));
+
+		if (ioctl(fd, DRM_IOCTL_SYNCOBJ_CREATE, &create))
+			die("SYNCOBJ_CREATE");
+		signal.handle = create.handle;
+		signal.flags = DRM_PVR_SYNC_OP_FLAG_HANDLE_TYPE_SYNCOBJ | DRM_PVR_SYNC_OP_FLAG_SIGNAL;
+		jobs[1].sync_ops.count = 1;
+		jobs[1].sync_ops.array = (uintptr_t)&signal;
+		for (r = 0; r < n; r++) {
+			struct drm_syncobj_wait wait = { .handles = (uintptr_t)&create.handle,
+							 .count_handles = 1 };
+			struct drm_syncobj_array reset = { .handles = (uintptr_t)&create.handle,
+							   .count_handles = 1 };
+
+			clock_gettime(CLOCK_MONOTONIC, &t1);
+			wait.timeout_nsec = t1.tv_sec * 1000000000ll + t1.tv_nsec + 2000000000ll;
+			if (ioctl(fd, DRM_IOCTL_PVR_SUBMIT_JOBS, &submit))
+				die("SUBMIT_JOBS");
+			if (ioctl(fd, DRM_IOCTL_SYNCOBJ_WAIT, &wait)) {
+				printf("repeat: render %d did not finish\n", r + 1);
+				return 1;
+			}
+			ioctl(fd, DRM_IOCTL_SYNCOBJ_RESET, &reset);
+		}
+		jobs[1].sync_ops.count = 0;
+		printf("repeat: %d renders done\n", n);
+	}
 	if (ioctl(fd, DRM_IOCTL_PVR_SUBMIT_JOBS, &submit))
 		die("SUBMIT_JOBS");
 	do {

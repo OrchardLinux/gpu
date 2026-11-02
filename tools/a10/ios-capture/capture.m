@@ -462,12 +462,18 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
     [[NSFileManager defaultManager] removeItemAtPath:dir error:nil];
     [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES
                                                attributes:nil error:nil];
-    install_iohooks();
     // Log every IOKit call from device creation on: resource creation replies
     // carry each buffer's CPU and GPU address (needed to replay the submit).
-    gHookDir = [dir stringByAppendingPathComponent:@"iocalls"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:gHookDir withIntermediateDirectories:YES
+    // With GC_REPEAT the hooks go in only before the captured render: once
+    // IOKit is patched, a render's completion faults (as after the trap).
+    const int repeat = getenv("GC_REPEAT") ? atoi(getenv("GC_REPEAT")) : 0;
+    NSString *hookDir = [dir stringByAppendingPathComponent:@"iocalls"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:hookDir withIntermediateDirectories:YES
                                                attributes:nil error:nil];
+    if (!repeat) {
+        install_iohooks();
+        gHookDir = hookDir;
+    }
     id<MTLDevice> dev = MTLCreateSystemDefaultDevice();
     NSError *err = nil;
     id<MTLLibrary> lib = [dev newLibraryWithSource:render_source(v) options:nil error:&err];
@@ -513,88 +519,103 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
     logf_(@"variant %s: device %@, target texture gpu resource 0x%llx", v->name, dev.name,
           tex.gpuResourceID._impl);
     id<MTLCommandQueue> q = [dev newCommandQueue];
-    id<MTLCommandBuffer> cb = [q commandBuffer];
-    MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
-    rp.colorAttachments[0].texture = tex;
-    rp.colorAttachments[0].loadAction = v->load ? MTLLoadActionLoad : MTLLoadActionClear;
-    rp.colorAttachments[0].clearColor = MTLClearColorMake(v->clear[0], v->clear[1], v->clear[2],
-                                                          v->clear[3]);
-    rp.colorAttachments[0].storeAction = MTLStoreActionStore;
-    if (v->flags & RV_DEPTH) {
-        MTLTextureDescriptor *dd = [MTLTextureDescriptor
-            texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float width:v->width
-                                         height:v->height mipmapped:NO];
-        dd.usage = MTLTextureUsageRenderTarget;
-        dd.storageMode = MTLStorageModePrivate;
-        rp.depthAttachment.texture = [dev newTextureWithDescriptor:dd];
-        rp.depthAttachment.loadAction = MTLLoadActionClear;
-        rp.depthAttachment.storeAction = MTLStoreActionStore;
-        rp.depthAttachment.clearDepth = 1.0;
-    }
-    id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
-    [enc setRenderPipelineState:ps];
-    if (v->flags & RV_DEPTH) {
-        MTLDepthStencilDescriptor *dsd = [MTLDepthStencilDescriptor new];
-        dsd.depthCompareFunction = MTLCompareFunctionLess;
-        dsd.depthWriteEnabled = YES;
-        [enc setDepthStencilState:[dev newDepthStencilStateWithDescriptor:dsd]];
-    }
-    if (v->flags & RV_CULL)
-        [enc setCullMode:MTLCullModeFront];
-    if (v->flags & RV_SCISSOR)
-        [enc setScissorRect:(MTLScissorRect){ 8, 8, 40, 40 }];
-    if (v->kind == 3) {
-        // A 4x4 RGBA8 texture with distinct texels, nearest sampling
-        MTLTextureDescriptor *sd = [MTLTextureDescriptor
-            texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:4 height:4 mipmapped:NO];
-        sd.storageMode = MTLStorageModeShared;
-        id<MTLTexture> src;
-        if (v->flags & RV_TEX_LINEAR_LAYOUT) {
-            id<MTLBuffer> back = [dev newBufferWithLength:4096 options:MTLResourceStorageModeShared];
-            src = [back newTextureWithDescriptor:sd offset:0 bytesPerRow:256];
-            logf_(@"linear texture: buffer gpu 0x%llx", back.gpuAddress);
-        } else {
-            src = [dev newTextureWithDescriptor:sd];
+    // GC_REPEAT renders before the captured one: what iPadOS changes from one
+    // render to the next (the A10 geometry stall, 2026-11-02)
+    id<MTLCommandBuffer> cb = nil;
+    for (int r = 0; r <= repeat; r++) {
+        if (r == repeat && repeat) {
+            install_iohooks();
+            gHookDir = hookDir;
         }
-        uint32_t texels[16];
-        for (int i = 0; i < 16; i++)
-            texels[i] = 0xff000000u | (uint32_t)(i * 16) << 16 | (uint32_t)(255 - i * 16) << 8 | 0x40;
-        [src replaceRegion:MTLRegionMake2D(0, 0, 4, 4) mipmapLevel:0 withBytes:texels bytesPerRow:16];
-        MTLSamplerDescriptor *smp = [MTLSamplerDescriptor new];
-        smp.minFilter = smp.magFilter = MTLSamplerMinMagFilterNearest;
-        if (v->flags & RV_TEX_LINEAR) {
-            smp.minFilter = smp.magFilter = MTLSamplerMinMagFilterLinear;
-            smp.sAddressMode = smp.tAddressMode = MTLSamplerAddressModeRepeat;
+        const unsigned traps = gTotalTraps;
+        const double t0 = CFAbsoluteTimeGetCurrent();
+        cb = [q commandBuffer];
+        MTLRenderPassDescriptor *rp = [MTLRenderPassDescriptor renderPassDescriptor];
+        rp.colorAttachments[0].texture = tex;
+        rp.colorAttachments[0].loadAction = v->load ? MTLLoadActionLoad : MTLLoadActionClear;
+        rp.colorAttachments[0].clearColor = MTLClearColorMake(v->clear[0], v->clear[1], v->clear[2],
+                                                              v->clear[3]);
+        rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        if (v->flags & RV_DEPTH) {
+            MTLTextureDescriptor *dd = [MTLTextureDescriptor
+                texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float width:v->width
+                                             height:v->height mipmapped:NO];
+            dd.usage = MTLTextureUsageRenderTarget;
+            dd.storageMode = MTLStorageModePrivate;
+            rp.depthAttachment.texture = [dev newTextureWithDescriptor:dd];
+            rp.depthAttachment.loadAction = MTLLoadActionClear;
+            rp.depthAttachment.storeAction = MTLStoreActionStore;
+            rp.depthAttachment.clearDepth = 1.0;
         }
-        [enc setFragmentTexture:src atIndex:0];
-        [enc setFragmentSamplerState:[dev newSamplerStateWithDescriptor:smp] atIndex:0];
-        logf_(@"texture source gpu resource 0x%llx", src.gpuResourceID._impl);
+        id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
+        [enc setRenderPipelineState:ps];
+        if (v->flags & RV_DEPTH) {
+            MTLDepthStencilDescriptor *dsd = [MTLDepthStencilDescriptor new];
+            dsd.depthCompareFunction = MTLCompareFunctionLess;
+            dsd.depthWriteEnabled = YES;
+            [enc setDepthStencilState:[dev newDepthStencilStateWithDescriptor:dsd]];
+        }
+        if (v->flags & RV_CULL)
+            [enc setCullMode:MTLCullModeFront];
+        if (v->flags & RV_SCISSOR)
+            [enc setScissorRect:(MTLScissorRect){ 8, 8, 40, 40 }];
+        if (v->kind == 3) {
+            // A 4x4 RGBA8 texture with distinct texels, nearest sampling
+            MTLTextureDescriptor *sd = [MTLTextureDescriptor
+                texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:4 height:4 mipmapped:NO];
+            sd.storageMode = MTLStorageModeShared;
+            id<MTLTexture> src;
+            if (v->flags & RV_TEX_LINEAR_LAYOUT) {
+                id<MTLBuffer> back = [dev newBufferWithLength:4096 options:MTLResourceStorageModeShared];
+                src = [back newTextureWithDescriptor:sd offset:0 bytesPerRow:256];
+                logf_(@"linear texture: buffer gpu 0x%llx", back.gpuAddress);
+            } else {
+                src = [dev newTextureWithDescriptor:sd];
+            }
+            uint32_t texels[16];
+            for (int i = 0; i < 16; i++)
+                texels[i] = 0xff000000u | (uint32_t)(i * 16) << 16 | (uint32_t)(255 - i * 16) << 8 | 0x40;
+            [src replaceRegion:MTLRegionMake2D(0, 0, 4, 4) mipmapLevel:0 withBytes:texels bytesPerRow:16];
+            MTLSamplerDescriptor *smp = [MTLSamplerDescriptor new];
+            smp.minFilter = smp.magFilter = MTLSamplerMinMagFilterNearest;
+            if (v->flags & RV_TEX_LINEAR) {
+                smp.minFilter = smp.magFilter = MTLSamplerMinMagFilterLinear;
+                smp.sAddressMode = smp.tAddressMode = MTLSamplerAddressModeRepeat;
+            }
+            [enc setFragmentTexture:src atIndex:0];
+            [enc setFragmentSamplerState:[dev newSamplerStateWithDescriptor:smp] atIndex:0];
+            logf_(@"texture source gpu resource 0x%llx", src.gpuResourceID._impl);
+        }
+        if (v->kind == 9) {
+            float c[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
+            id<MTLBuffer> cbuf = [dev newBufferWithBytes:c length:sizeof(c)
+                                                 options:MTLResourceStorageModeShared];
+            [enc setFragmentBuffer:cbuf offset:0 atIndex:0];
+            logf_(@"fragment constant buffer gpu 0x%llx", cbuf.gpuAddress);
+        }
+        id<MTLBuffer> ibuf = nil;
+        if (v->flags & RV_INDEXED) {
+            uint16_t idx[4] = { 0, 1, 2, 0 };
+            ibuf = [dev newBufferWithBytes:idx length:sizeof(idx) options:MTLResourceStorageModeShared];
+            logf_(@"index buffer gpu 0x%llx", ibuf.gpuAddress);
+        }
+        const NSUInteger instances = getenv("GC_INSTANCES") ? strtoul(getenv("GC_INSTANCES"), NULL, 0) : 2;
+        for (int i = 0; i < v->draws; i++) {
+            if (ibuf)
+                [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:3
+                                 indexType:MTLIndexTypeUInt16 indexBuffer:ibuf indexBufferOffset:0];
+            else
+                [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:v->vertices
+                      instanceCount:(v->flags & RV_INSTANCED) ? instances : 1];
+        }
+        [enc endEncoding];
+        logf_(@"render: committing");
+        [cb commit];
+        [cb waitUntilCompleted];
+        if (r < repeat && (r < 4 || r % 25 == 0 || cb.status != MTLCommandBufferStatusCompleted))
+            logf_(@"render %d: status %ld, %u traps, %.2f ms", r, (long)cb.status,
+                  gTotalTraps - traps, (CFAbsoluteTimeGetCurrent() - t0) * 1e3);
     }
-    if (v->kind == 9) {
-        float c[4] = { 0.25f, 0.5f, 0.75f, 1.0f };
-        id<MTLBuffer> cbuf = [dev newBufferWithBytes:c length:sizeof(c)
-                                             options:MTLResourceStorageModeShared];
-        [enc setFragmentBuffer:cbuf offset:0 atIndex:0];
-        logf_(@"fragment constant buffer gpu 0x%llx", cbuf.gpuAddress);
-    }
-    id<MTLBuffer> ibuf = nil;
-    if (v->flags & RV_INDEXED) {
-        uint16_t idx[4] = { 0, 1, 2, 0 };
-        ibuf = [dev newBufferWithBytes:idx length:sizeof(idx) options:MTLResourceStorageModeShared];
-        logf_(@"index buffer gpu 0x%llx", ibuf.gpuAddress);
-    }
-    for (int i = 0; i < v->draws; i++) {
-        if (ibuf)
-            [enc drawIndexedPrimitives:MTLPrimitiveTypeTriangle indexCount:3
-                             indexType:MTLIndexTypeUInt16 indexBuffer:ibuf indexBufferOffset:0];
-        else
-            [enc drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:v->vertices
-                  instanceCount:(v->flags & RV_INSTANCED) ? 2 : 1];
-    }
-    [enc endEncoding];
-    logf_(@"render: committing");
-    [cb commit];
-    [cb waitUntilCompleted];
     gHookDir = nil;
     logf_(@"render: status %ld (no submit trap seen if this prints)", (long)cb.status);
     [gLog writeToFile:[dir stringByAppendingPathComponent:@"index.txt"] atomically:YES

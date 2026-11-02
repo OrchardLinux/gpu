@@ -109,11 +109,16 @@ if __name__ == '__main__':
             tool = '/var/tmp/gpu-capture-render'
             with open(HERE / 'build/gpu-capture', 'rb') as f:
                 ssh(f'cat > {tool} && chmod 755 {tool}', stdin=f, check=True)
+            # GC_INSTANCES / GC_REPEAT pass through to the tool (capture.m); the
+            # output directory carries them: instanced-i10-r100
+            env = ' '.join(f'{k}={os.environ[k]}' for k in ('GC_INSTANCES', 'GC_REPEAT') if k in os.environ)
+            suffix = ''.join(f'-{k[3].lower()}{os.environ[k]}' for k in ('GC_INSTANCES', 'GC_REPEAT')
+                             if k in os.environ)
             for variant in sys.argv[2:] or VARIANTS:
-                remote = f'/var/tmp/gpu-render-{variant}'
+                remote = f'/var/tmp/gpu-render-{variant}{suffix}'
                 # The tool may die after the submit; the snapshot is saved first.
-                ssh(f'{tool} --render {remote} {variant}')
-                out = RENDER_OUT / variant
+                ssh(f'{env} {tool} --render {remote} {variant}')
+                out = RENDER_OUT / (variant + suffix)
                 # a fresh directory: older runs' regions would mix in
                 shutil.rmtree(out, ignore_errors=True)
                 out.mkdir(parents=True, exist_ok=True)

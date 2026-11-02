@@ -677,3 +677,35 @@ minification and V repeat swapped (dword 1 bit 0 is V repeat, dword 0 bit
 the driver's row pitch (a leftover `4 * width` broke widths whose rows are
 not 64-byte aligned). The tiled window that seemed cut off in the same
 grabs is its box still growing: correct.
+
+## Instanced draws and the geometry hang (2026-11-02, Mesa fork `f9621d81ba5`, `93544a9772e`)
+
+- **Instance index:** the vertex kick's temps q0 holds the vertex index in its
+  low half and the instance index in its high half. A second DOUTW with
+  control `0x80002001` (Rogue: destination r1 at bit 13, BSIZE upper) writes
+  the instance index into r1, as iPadOS's `instanced` capture does. Vertex
+  shaders keep r0-r1 pinned; per-instance bindings index with r1. Divisors
+  other than 1 and a nonzero firstInstance are refused.
+- **The geometry hang of glmark2 `shading`/`build` and of instanced draws**
+  was VDM_STATE5's MAX_INSTANCES (bits 25-29, 0 = 32 instances per vertex
+  task). With 32, a vertex task of a 14-register shader never finishes:
+  the firmware runs StartTA, TA_FINISHED never comes, and the geometry job
+  stalls deterministically for a given submission rhythm (10 instances:
+  render 73 after a firmware start; 1000: within a few renders).
+  `pvr-tri TRI_INSTANCES=1000 TRI_REPEAT=300`, three runs each: VDM_STATE5
+  `0x1081` (8 registers) x 32 and `0x1c81` (14) x 4/8/16 pass, `0x1c81` x 32
+  hangs by render 17. The fork keeps registers x instances at 256.
+- **Ruled out on the way** (heap and window dumps per batch, register reads
+  during the stall, the firmware trace): free-list order and size, a lost
+  doorbell (a second one does nothing), the shared scheduling entry
+  (rotating entries changes nothing), clock scaling, runtime PM, Fender
+  power, and firmware counters.
+- **iPadOS reference:** `ios-capture` `GC_INSTANCES`/`GC_REPEAT` render N
+  times before the captured one. iPadOS renders 1000 instances 100 times
+  (about 1 ms each), and render 101 differs from render 1 only in stamps:
+  nothing per render or per instance count beyond the INDEX_LIST word.
+- **Firmware trace on a hang:** `apple_fw_debug=3` (writable; applies from
+  the next GPU reset) makes the hang report end with the SKU ring's last 24
+  records. A good geometry job: `0x111` dispatch, `0x102`/`0x103`, `0x000`
+  StartTA, `0x112`, event `0x102` (group 3, mask 0x80000000, events 0x20 =
+  TA_FINISHED), `0x001` FinalizeTA. The stalled one ends in `0x113 (1, 2)`.
