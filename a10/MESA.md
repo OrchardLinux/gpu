@@ -803,13 +803,17 @@ The difference: the kernel's 32 MiB parameter pool; the two 12 MB
 swapchain buffers (GBM on the display node, LINEAR, exported to the
 display: pixman has those too); a 12 MB GPU-only buffer, the SPM scratch
 buffer every render state allocates at framebuffer size, unused on G9P
-and gone with fork `73a49abe247`; another 12 MB CPU-mappable buffer
-created once on Labwc's first output commit, right before the swapchain
-buffers, never a display framebuffer, origin not found yet (the installed
-wlroots has only exported symbols, so perf attributed it to the nearest
-export, `wlr_ext_image_copy_capture_frame_v1_copy_buffer`, although no
-client captured: a wlroots build with symbols will tell); about 6 MB of
-Zink and Mesa buffers. A bare Zink client (eglinfo) allocates 2.5 MB.
+and gone with fork `73a49abe247`; another 12 MB CPU-mappable buffer:
+Zink's staging buffer for one `glReadPixels` of the whole screen, kept in
+its buffer cache afterwards. The reader is omarchy-a's readiness check: at
+login the shell runs `/usr/libexec/omarchy-desktop-ready`, which captures a
+frame with `grim -t ppm /dev/null` (found with `sched:sched_process_exec`
+during login: greetd → login-session → labwc → qs → omarchy-desktop-ready
+→ grim, and a wlroots build with symbols: `gles2_texture_read_pixels` ←
+`wlr_ext_image_copy_capture_frame_v1_copy_buffer`). Pixman reads memory
+directly and pays nothing. Fix belongs in the check (attest the frame
+without reading a whole one back, e.g. presentation feedback), an
+omarchy-a decision. About 6 MB of Zink and Mesa buffers remain. A bare Zink client (eglinfo) allocates 2.5 MB.
 Tools: `perf probe -x /usr/lib/libvulkan_powervr_mesa.so 'pvrbo=0x<offset of
 pvr_drm_winsys_buffer_create> size=%x1:u64'` with `--filter
 'size==12582912' --call-graph dwarf` (the kernel has uprobes, no kprobes).
