@@ -844,8 +844,9 @@ WebRender's `RenderBackend` (1.31 s). About 1 s goes with Zink: the
 session's `MESA_LOADER_DRIVER_OVERRIDE=zink` gives Firefox GL on the GPU
 device (on llvmpipe it saves about 1 s); the rest is probably memory
 pressure (30-80 MB less free at Firefox's peak, file pages evicted and
-reloaded). Not zero-copy (the gap predates it). Levers: the memory gap and
-which applications get Zink at all while the driver is incomplete.
+reloaded). Not zero-copy (the gap predates it). Lever: the memory gap. All
+applications keep Zink: the system is meant to run on the GPU, so the
+driver has to become complete rather than applications avoiding it.
 
 ## Zero-copy shared memory: the recipe (for any compositor)
 
