@@ -61,6 +61,8 @@ def install(src, dst, mode):
     temporary = dst + '.new'
     shutil.copyfile(src, temporary)
     os.chmod(temporary, mode)
+    with open(temporary, 'rb') as f:
+        os.fsync(f.fileno())
     os.replace(temporary, dst)
     os.remove(src)
     print('installed', dst)
@@ -99,4 +101,7 @@ subprocess.run(['gpasswd', '-a', 'tablet', 'render'], check=True)
 edit(SESSION, SESSION_ANCHOR, SESSION_ANCHOR + SESSION_BLOCK)
 edit(PICKER, PICKER_OLD, PICKER_NEW, PICKER_GPU_V1)
 os.remove('/tmp/gpu-installed-root.py')
+# A DFU reset is a hard reset: without this, ext4's delayed allocation left
+# every installed file empty at the next boot (2026-11-04).
+os.sync()
 print('done: log out and in')
