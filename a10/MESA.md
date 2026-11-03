@@ -835,6 +835,18 @@ The gap at the low point is down to about 50 MB (90 MB before). Left: the
 Mesa buffers; the readiness check's 12 MB read-back goes with the next
 install (omarchy-a `1b72e68`).
 
+**Why Firefox costs 2-3 s more in the GPU session** (per-thread CPU at the
+end of the Firefox phase, 2026-11-03): its rendering threads cost the same
+on both renderers (WebRender `Renderer` 24.56 against 24.59 s, `SwComposite`
+3.49 against 3.52 s, main thread 9.58 against 9.12 s), so it does not paint
+more or more often. The extra is spread over small threads, the largest
+WebRender's `RenderBackend` (1.31 s). About 1 s goes with Zink: the
+session's `MESA_LOADER_DRIVER_OVERRIDE=zink` gives Firefox GL on the GPU
+device (on llvmpipe it saves about 1 s); the rest is probably memory
+pressure (30-80 MB less free at Firefox's peak, file pages evicted and
+reloaded). Not zero-copy (the gap predates it). Levers: the memory gap and
+which applications get Zink at all while the driver is incomplete.
+
 ## Zero-copy shared memory: the recipe (for any compositor)
 
 Clients that draw on the CPU (foot, Qt Quick software, GTK, Firefox's
