@@ -852,28 +852,34 @@ here) and a second copy of every surface in GPU memory. Instead:
    first page) and fail an unsupported import cleanly instead of asserting.
    Row pitch: G9P wants 64-byte multiples (16 pixels of XRGB8888), which
    full-width windows meet; others fail the import and are copied.
-3. **Compositor**, per `wl_shm` buffer, on first use:
+3. **Compositor**, in its **GPU renderer's texture path only**, per
+   `wl_shm` buffer on first use:
    - only if the pool's fd is a memfd sealed with `F_SEAL_SHRINK` (Qt, GTK,
-     foot and Firefox do; GTK's own `gdk-wayland` pool is not, it gets
-     copied);
+     foot and Firefox do; GTK's own `gdk-wayland` pool and grim's buffers are
+     not, they get copied);
    - `UDMABUF_CREATE` over the buffer's own pages only (offset rounded down,
      end rounded up to the page size): a pool can be large and sparse (foot
      reserves one to scroll in) and udmabuf pins everything it covers. A
      whole-pool udmabuf pinned 1 GB for one foot window here;
-   - describe the buffer as a one-plane LINEAR DMA-BUF (`offset` = its offset
-     in the first page, `stride` as the client gave it) and import it like a
-     client DMA-BUF (EGLImage);
+   - import it as a one-plane LINEAR DMA-BUF (`offset` = the buffer's offset
+     in its first page, `stride` as the client gave it), like a client
+     DMA-BUF (EGLImage), and keep the udmabuf with that import;
    - keep the buffer locked while a texture samples it, as for DMA-BUF
      clients: do not release it after "uploading";
-   - close the udmabuf when the buffer is destroyed;
-   - if the import fails, copy as before (and stop trying for a while).
+   - if the import fails, copy as before (and stop trying).
 
-   wlroots: omarchy-a `desktop/packages/wlroots0.20/0002` (in
-   `types/wlr_shm.c` the buffer gets `get_dmabuf`; the GLES2 renderer
-   already prefers DMA-BUFs and gains the fallback). **Hyprland** does not
-   use wlroots' buffer code: the same steps belong where Aquamarine/Hyprland
-   turn a `wl_shm` buffer into a texture (its shm buffer type's dmabuf
-   attributes, or the renderer's shm texture path).
+   Keep it out of the generic buffer code: a first version gave every
+   `wl_shm` buffer a DMA-BUF (`get_dmabuf` in `types/wlr_shm.c`), and then
+   screen capture (`ext-image-copy-capture` and `wlr-screencopy` take the
+   DMA-BUF path for a client's destination buffer, which pixman cannot
+   fill) and KMS direct scanout would treat shm buffers as DMA-BUFs on every
+   board, GPU or not. Nothing outside the GPU renderer may assume a GPU.
+
+   wlroots: omarchy-a `desktop/packages/wlroots0.20/0002`
+   (`gles2_buffer_get_or_create_from_shm()` in `render/gles2/renderer.c`,
+   used by `gles2_texture_from_buffer()`). **Hyprland** has its own renderer
+   (Aquamarine/Hyprland, not wlroots): the same steps belong where it turns
+   a `wl_shm` buffer into a texture.
 4. **Coherence**: the A10 GPU sees what the CPU wrote to cached memory
    (apple_cpu_cached experiment: 300 texture uploads and the suite without
    cache maintenance). On a GPU without that, the compositor would need a
