@@ -26,10 +26,9 @@ rendering; RENDER.md "The first Vulkan frame").
   points on a device feature `has_apple_g9p` instead of compiling every
   `pvr_arch_*` file a second time. Can become `PVR_DEVICE_ARCH_G9P` later if
   the differences grow.
-- **Home:** a standalone Mesa clone, local for now:
-  `~/projects/OrchardLinux/mesa-g9p` (upstream main at `801952de2f1`,
-  blob-filtered clone). It moves to a hosted fork once a distro package
-  needs a URL.
+- **Home:** the fork [OrchardLinux/mesa](https://github.com/OrchardLinux/mesa),
+  branch `main` (forked from upstream main at `801952de2f1`); the scripts
+  take the clone's path as an argument.
 - **Delivery:** dev loop = build in a container, push the driver into a
   chroot on the iPad (below). Release = a distro package (Arch-style
   PKGBUILD in the distro) building the fork at a pinned commit.
