@@ -902,8 +902,8 @@ clients' own pages) and `ls -l /proc/<compositor>/fd | grep dmabuf`.
 
 ## Conformance and ES 3 (2026-11-03)
 
-dEQP-GLES2 results and method: "GLES 2 with dEQP" below. No Vulkan CTS, GLES 3
-or `KHR-GLES2` run yet. The tools: `tools/a10/mesa/build-deqp.sh MESA_DIR tools/a10/out` builds the GLES CTS
+dEQP-GLES2 results and method: "GLES 2 with dEQP" below. No Vulkan CTS or GLES 3
+run yet. The tools: `tools/a10/mesa/build-deqp.sh MESA_DIR tools/a10/out` builds the GLES CTS
 release and patches Mesa CI uses (`deqp-gles2/3/31`, `glcts`) in a tmpfs,
 `deqp-deploy.sh` copies it to the installed Omarchy A (A10 overlay applied,
 so it tests the stack we ship: Arch's Zink on the fork's Vulkan driver), and
@@ -934,9 +934,7 @@ Qt's software renderer.
 ## GLES 2 with dEQP (2026-11-05, Mesa fork `g9p-gles2`)
 
 Not finished. On a seeded 10% sample of the must-pass list (1,716 of 17,165
-tests): 1,634 pass, 18 not supported, 64 fail, no GPU hangs, at `ce79827cd1f`.
-Largest open group: wrong LOD at primitive edges (below). Not tested on the GPU
-desktop yet.
+tests): see "Results" below. Not tested on the GPU desktop yet: do that before ES 3.
 
 ### Method, for any board
 
@@ -988,7 +986,8 @@ Open: cube faces show seam strips.
 
 - **Clears:** a depth/stencil clear with no colour needs tag writes on and the
   translucent pass (`0x03cc0000` with stencil, `0x03c40000` without, pass 1).
-- **D16 depth clear value is a float** like the others: as 65535 every LESS failed.
+- **D16 depth clear value is a float** like the others: as 65535 every LESS failed
+  (the A9 code uses the integer: not tested again since the reload recipe).
 - **Depth bias** uses Rogue's table, index and ISPCTL bit, with its D16 scale of 512.
 - **Stencil clear value:** `ISP_BGOBJVALS` does not set stencil on this path, so
   a non-zero stencil clear is drawn with the first draw. Forcing that clear for
@@ -1000,7 +999,9 @@ Open: cube faces show seam strips.
 
 ### Vertex register pressure
 
-Allocate low registers first; most shaders never get past r15. A vertex shader
+Allocate low registers first; most shaders never get past r15. Fragment buffers are
+laid out compactly in the common store from the compiler's first pass, since uniform
+operands stop working from dword 256. A vertex shader
 that runs out compiles again with values above r15 and r11-r14 kept free for
 address work, parking values above r31 if needed, then once more repeating loads
 and scheduling by register pressure.
@@ -1023,15 +1024,72 @@ a unorm target must clamp the value it reads. Also, a draw with a colour mask of
 must still read the tile: with no read it runs opaque, over what is there. Together
 these took dEQP fragment_ops interaction and random from 64 to 200 of 200.
 
-### Open: wrong LOD at primitive edges
+### Helper pixels and mip levels (solved)
 
-Largest open problem. Where a 2x2 quad reaches outside the primitive, the LOD is
-far too high: a ring of wrong mip levels on the viewport's edge rows and columns
-when its position is odd. With triangle merging off (`SIZEINFO2` bit 14) the
-diagonal shows it too, so it is every primitive edge, not the viewport. It is not
-the scissor (removed entirely: no change), the pass type, sample rate, or register
-versus straight iterate. Apple's shader code is identical to ours, so the
-difference is in state that a capture of an iOS mipmapped draw would show.
+A ring of wrong mip levels at primitive edges had two causes, found by comparing
+with iOS, which draws the same case correctly on this chip:
+
+- **Iterate form.** A register iterate before a wait is two words in Apple's code,
+  `1b08 0200 004d`. Our three-word form (`... 0080`, W1 with its continuation bit)
+  left helper pixels without values, so samples got wrong derivatives.
+- **Triangle merging.** A helper pixel from the neighbouring triangle has another
+  gradient when W varies: `SIZEINFO2` bit 14 set for textured draws and lines.
+
+### 3D textures
+
+A 3D image is a 2D array of its slices (the A9's measurement, PR #6; Apple's
+`getLevelOffset` has no depth term): one slice's twiddled 2D levels, slice z of every
+level z layer pitches on, a layer holding the whole 2D chain when the image has levels.
+It is not 3D Morton order. Layout 5, slice count in the layers' field (bit 111), `fb1a`
+samples. Before this the GPU hung repeatedly, enough to take the tablet down.
+
+### Results on 2026-11-06 (Mesa `c2788cc428a`)
+
+`gles2-main`: 17,071 of 17,165 OK (16,906 pass, 112 not supported, 53 quality
+warnings), 93 fail, 1 hang (`uniform_api.random.80`, passes alone). `gles2-khr-main`:
+468 of 473 OK. A full run takes about 6 minutes: `full-7.csv`, `khr-2.csv` in
+`tools/a10/out/deqp-results/`.
+
+Open, by size:
+
+- **Vertex cube samples** (about 60): results depend on the vertex instance count, so
+  some vertices are wrong. Tried: the direction in r0-r2 with Apple's `1199 01..` form
+  and float add, result over coordinates, indices kept elsewhere. iOS draws it correctly
+  (capture `vscube-r1`), whose state has not been compared yet.
+- **Depth/stencil reload** (about 28, plus 4 KHR `internalformat` that sample depth): see
+  below.
+- **Small:** `gl_PointCoord`, `clip_control` (2), cube `linear_*` mipmaps (6: mixed
+  colours at face edges), `tmp_array` out of registers (3), `all_features.fragment` (2:
+  vec4 NIR registers), `uniform_api.random` (2), KHR `texture_3d...negative` (crash).
+
+### Depth/stencil reload: the iOS recipe, not yet working
+
+iOS words (captures `dsreload*-r1`, each reload verified by its pixels):
+
+| Format | Store | Load |
+|---|---|---|
+| D32F | `000a2004` | `0002a002` |
+| D32F_S8 | `000e2004` | `00026002` |
+| D16 | `050a2004` | `0502a002` |
+| S8 | `00062004` | `00026002` |
+
+From these and PR #6's `pvr_g5p_ds.c`: load and store twiddled (bits 13, 17) with the
+extents in ZLSCTL left 0; `ISP_ZLS_PIXELS` (`(w-1) | (h-1) << 15`, our 0xfd8 word) sizes
+the surface, aligned to 32 with a stencil plane or a side under 32; each plane is Morton
+order over a power-of-two square of 32-pixel tiles; stencil follows depth at a 16 KiB
+boundary.
+
+Known bug: `g9p_frag_stream()` sets `ISP_ZLS_PIXELS` only with a depth attachment, so an
+S8 attachment stores nothing (its memory stays zero). The first attempt at the whole
+recipe hung a fragment job and wedged the GPU, so the variants tried after it are
+**invalid**, not failures. Patch: `tools/a10/out/deqp-results/session-tools/ds-wip.patch`.
+
+Next: apply one change per boot at most until it is safe, the `ZLS_PIXELS` fix first and
+twiddled store last.
+
+**After any GPU hang, stop and reboot.** A wedged GPU fails every later test, including
+known good drivers, and looks like the experiment failed. Check `dmesg` for "resetting"
+after each test. Passing tests can hide it.
 
 ## Roadmap (2026-11-03)
 

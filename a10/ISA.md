@@ -305,6 +305,11 @@ named `*.mtlp-json`.
 - **In a vertex shader, writes to r0-r3 use W1 `0x01..`** and writes above use
   `0x03..` in Apple's code, and in `1199` the first register operand has the
   0x80 flag. Why is not known.
+- **Register iterates before a wait have two words,** `1b08 0200 004d`: W1 without
+  its continuation bit and no third word. With `... 0080` helper pixels get no value.
+- **3D samples** are `fb1a` (fragment and vertex), coordinates in three registers.
+- **gl_FrontFacing:** `0198 dst 0131 0110 0154 0038` reads the winding, not the state:
+  XOR it with the draw's front face.
 - **Open:** cube samples in vertex shaders give results that depend on the
   vertex instance count, so some vertices are wrong.
 

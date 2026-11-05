@@ -360,6 +360,10 @@ enum {
     RV_SCISSOR = 64,        // scissor rect (8, 8, 40, 40)
     RV_INDEXED = 128,       // drawIndexedPrimitives, uint16 indices 0, 1, 2
     RV_INSTANCED = 256,     // 2 instances; kind 0 shifts instance 1 by instance_id
+    RV_ODD_VIEWPORT = 512,  // viewport (3, 5, 32, 32): quads cut at its edges
+    RV_STENCIL = 1024,      // dsreload: Depth32Float_Stencil8, stencil kept too
+    RV_D16 = 2048,          // dsreload: Depth16Unorm
+    RV_S8 = 4096,           // dsreload: Stencil8 only
 };
 
 // Each variant changes one parameter of "base", so diffs isolate its fields.
@@ -399,9 +403,57 @@ static const RenderVariant kVariants[] = {
     {"fragcoord", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "", 7},
     {"discard", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "", 8},
     {"fubo", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "", 9},
+    // GLES 2 open problems: run with GC_REPEAT=1, which saves pixels.raw of a finished render.
+    // A mipmapped texture whose levels are solid colours: at LOD 0 only level 0 shows.
+    {"mip", 64, 64, 6, 1, {0, 0, 0, 1}, NO, "", 10, RV_ODD_VIEWPORT},
+    {"miptri", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "", 10},
+    {"mipd", 64, 64, 6, 1, {0, 0, 0, 1}, NO, "", 10, RV_ODD_VIEWPORT | RV_DEPTH},
+    // Depth (and stencil) stored by one render and loaded by the next
+    {"dsreload", 64, 64, 6, 1, {0, 0, 0, 1}, NO, "", 11},
+    {"dsreload8", 64, 64, 6, 1, {0, 0, 0, 1}, NO, "", 11, RV_STENCIL},
+    {"dsreload16", 64, 64, 6, 1, {0, 0, 0, 1}, NO, "", 11, RV_D16},
+    {"dsreloads8", 64, 64, 6, 1, {0, 0, 0, 1}, NO, "", 11, RV_S8 | RV_STENCIL},
+    // A cube map sampled in the vertex shader
+    {"vscube", 64, 64, 30, 1, {0, 0, 0, 1}, NO, "", 12},
 };
 
 static NSString *render_source(const RenderVariant *v) {
+    if (v->kind == 10)
+        return @"#include <metal_stdlib>\n"
+                "using namespace metal;\n"
+                "struct V { float4 pos [[position]]; float2 uv; };\n"
+                "vertex V tri_vs(uint vid [[vertex_id]]) {\n"
+                "    float2 p[6] = { float2(-1, -1), float2(1, -1), float2(-1, 1),\n"
+                "                    float2(-1, 1), float2(1, -1), float2(1, 1) };\n"
+                "    V o; o.pos = float4(p[vid], 0.0, 1.0); o.uv = p[vid] * 0.5 + 0.5; return o;\n"
+                "}\n"
+                "fragment float4 tri_fs(V v [[stage_in]], texture2d<float> t [[texture(0)]],\n"
+                "                       sampler s [[sampler(0)]]) { return t.sample(s, v.uv); }\n";
+    if (v->kind == 11)
+        return @"#include <metal_stdlib>\n"
+                "using namespace metal;\n"
+                "vertex float4 tri_vs(uint vid [[vertex_id]], constant float4 &c [[buffer(0)]]) {\n"
+                "    float2 p[6] = { float2(-1, -1), float2(1, -1), float2(-1, 1),\n"
+                "                    float2(-1, 1), float2(1, -1), float2(1, 1) };\n"
+                "    return float4(p[vid].x * c.x + c.y, p[vid].y, c.z, 1.0);\n"
+                "}\n"
+                "fragment float4 tri_fs(constant float4 &c [[buffer(0)]]) { return c; }\n";
+    if (v->kind == 12)
+        return @"#include <metal_stdlib>\n"
+                "using namespace metal;\n"
+                "struct V { float4 pos [[position]]; float4 c; };\n"
+                "vertex V tri_vs(uint vid [[vertex_id]], texturecube<float> t [[texture(0)]],\n"
+                "                sampler s [[sampler(0)]]) {\n"
+                "    float2 q[6] = { float2(0, 0), float2(1, 0), float2(0, 1),\n"
+                "                    float2(0, 1), float2(1, 0), float2(1, 1) };\n"
+                "    float3 d[5] = { float3(1, 0, 0), float3(-1, 0, 0), float3(0, 1, 0),\n"
+                "                    float3(0, -1, 0), float3(0, 0, 1) };\n"
+                "    uint cell = vid / 6;\n"
+                "    float2 p = q[vid % 6];\n"
+                "    V o; o.pos = float4((p.x + float(cell)) * 0.4 - 1.0, p.y * 2.0 - 1.0, 0.0, 1.0);\n"
+                "    o.c = t.sample(s, d[cell], level(0.0)); return o;\n"
+                "}\n"
+                "fragment float4 tri_fs(V v [[stage_in]]) { return v.c; }\n";
     if (v->kind == 0)
         return [NSString stringWithFormat:
             @"#include <metal_stdlib>\n"
@@ -495,6 +547,15 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
     }
     if (v->flags & RV_DEPTH)
         pd.depthAttachmentPixelFormat = MTLPixelFormatDepth32Float;
+    if (v->kind == 11) {
+        pd.depthAttachmentPixelFormat = (v->flags & RV_S8) ? MTLPixelFormatInvalid :
+                                        (v->flags & RV_D16) ? MTLPixelFormatDepth16Unorm :
+                                        (v->flags & RV_STENCIL) ? MTLPixelFormatDepth32Float_Stencil8
+                                                                : MTLPixelFormatDepth32Float;
+        if (v->flags & RV_STENCIL)
+            pd.stencilAttachmentPixelFormat = (v->flags & RV_S8) ? MTLPixelFormatStencil8
+                                                                 : MTLPixelFormatDepth32Float_Stencil8;
+    }
     id<MTLRenderPipelineState> ps = [dev newRenderPipelineStateWithDescriptor:pd error:&err];
     if (!ps) {
         logf_(@"pipeline failed: %@", err);
@@ -547,8 +608,120 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
             rp.depthAttachment.storeAction = MTLStoreActionStore;
             rp.depthAttachment.clearDepth = 1.0;
         }
+        if (v->kind == 11) {
+            // First render: left half at depth 0.25, stencil 7. Second render loads both and
+            // draws the whole target at depth 0.5, compare less: only the right half draws if
+            // the depth came back. With stencil, the second draw also needs stencil == 7, and
+            // so draws only the left half if the depth is ignored.
+            const MTLPixelFormat dsf = (v->flags & RV_S8) ? MTLPixelFormatStencil8 :
+                                       (v->flags & RV_D16) ? MTLPixelFormatDepth16Unorm :
+                                       (v->flags & RV_STENCIL) ? MTLPixelFormatDepth32Float_Stencil8
+                                                               : MTLPixelFormatDepth32Float;
+            MTLTextureDescriptor *dd = [MTLTextureDescriptor
+                texture2DDescriptorWithPixelFormat:dsf width:v->width height:v->height mipmapped:NO];
+            dd.usage = MTLTextureUsageRenderTarget;
+            dd.storageMode = MTLStorageModePrivate;
+            id<MTLTexture> ds = [dev newTextureWithDescriptor:dd];
+            if (!(v->flags & RV_S8)) {
+                rp.depthAttachment.texture = ds;
+                rp.depthAttachment.loadAction = MTLLoadActionClear;
+                rp.depthAttachment.storeAction = MTLStoreActionStore;
+                rp.depthAttachment.clearDepth = 1.0;
+            }
+            if (v->flags & RV_STENCIL) {
+                rp.stencilAttachment.texture = ds;
+                rp.stencilAttachment.loadAction = MTLLoadActionClear;
+                rp.stencilAttachment.storeAction = MTLStoreActionStore;
+                rp.stencilAttachment.clearStencil = 0;
+            }
+            id<MTLRenderCommandEncoder> first = [cb renderCommandEncoderWithDescriptor:rp];
+            [first setRenderPipelineState:ps];
+            MTLDepthStencilDescriptor *dsd = [MTLDepthStencilDescriptor new];
+            dsd.depthCompareFunction = MTLCompareFunctionAlways;
+            dsd.depthWriteEnabled = YES;
+            if (v->flags & RV_STENCIL) {
+                MTLStencilDescriptor *st = [MTLStencilDescriptor new];
+                st.stencilCompareFunction = MTLCompareFunctionAlways;
+                st.depthStencilPassOperation = MTLStencilOperationReplace;
+                dsd.frontFaceStencil = dsd.backFaceStencil = st;
+                [first setStencilReferenceValue:7];
+            }
+            [first setDepthStencilState:[dev newDepthStencilStateWithDescriptor:dsd]];
+            const float a[4] = { 0.5f, -0.5f, 0.25f, 1.0f };
+            [first setVertexBytes:a length:sizeof(a) atIndex:0];
+            [first setFragmentBytes:a length:sizeof(a) atIndex:0];
+            [first drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];
+            [first endEncoding];
+            rp.colorAttachments[0].loadAction = MTLLoadActionLoad;
+            if (!(v->flags & RV_S8))
+                rp.depthAttachment.loadAction = MTLLoadActionLoad;
+            if (v->flags & RV_STENCIL)
+                rp.stencilAttachment.loadAction = MTLLoadActionLoad;
+        }
         id<MTLRenderCommandEncoder> enc = [cb renderCommandEncoderWithDescriptor:rp];
         [enc setRenderPipelineState:ps];
+        if (v->flags & RV_ODD_VIEWPORT)
+            [enc setViewport:(MTLViewport){ 3, 5, 32, 32, 0, 1 }];
+        if (v->kind == 11) {
+            MTLDepthStencilDescriptor *dsd = [MTLDepthStencilDescriptor new];
+            dsd.depthCompareFunction = MTLCompareFunctionLess;
+            dsd.depthWriteEnabled = NO;
+            if (v->flags & RV_STENCIL) {
+                MTLStencilDescriptor *st = [MTLStencilDescriptor new];
+                st.stencilCompareFunction = MTLCompareFunctionEqual;
+                dsd.frontFaceStencil = dsd.backFaceStencil = st;
+                dsd.depthCompareFunction = MTLCompareFunctionAlways;
+                [enc setStencilReferenceValue:7];
+            }
+            [enc setDepthStencilState:[dev newDepthStencilStateWithDescriptor:dsd]];
+            const float b[4] = { 1.0f, 0.0f, 0.5f, 1.0f };
+            [enc setVertexBytes:b length:sizeof(b) atIndex:0];
+            [enc setFragmentBytes:b length:sizeof(b) atIndex:0];
+        }
+        if (v->kind == 10) {
+            // Level n of a 32x32 texture is the solid colour n
+            static const uint32_t level[6] = { 0xff102030u, 0xffff0000u, 0xff00ff00u,
+                                               0xff0000ffu, 0xffffff00u, 0xffffffffu };
+            MTLTextureDescriptor *sd = [MTLTextureDescriptor
+                texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:32 height:32 mipmapped:YES];
+            sd.storageMode = MTLStorageModeShared;
+            id<MTLTexture> src = [dev newTextureWithDescriptor:sd];
+            for (int l = 0; l < 6; l++) {
+                const int n = 32 >> l;
+                uint32_t texels[32 * 32];
+
+                for (int i = 0; i < n * n; i++)
+                    texels[i] = level[l];
+                [src replaceRegion:MTLRegionMake2D(0, 0, n, n) mipmapLevel:l withBytes:texels
+                       bytesPerRow:4 * n];
+            }
+            MTLSamplerDescriptor *smp = [MTLSamplerDescriptor new];
+            smp.minFilter = smp.magFilter = MTLSamplerMinMagFilterNearest;
+            smp.mipFilter = MTLSamplerMipFilterNearest;
+            [enc setFragmentTexture:src atIndex:0];
+            [enc setFragmentSamplerState:[dev newSamplerStateWithDescriptor:smp] atIndex:0];
+            logf_(@"mip texture gpu resource 0x%llx", src.gpuResourceID._impl);
+        }
+        if (v->kind == 12) {
+            static const uint32_t face[6] = { 0xffff0000u, 0xff00ff00u, 0xff0000ffu,
+                                              0xffffff00u, 0xffff00ffu, 0xff00ffffu };
+            MTLTextureDescriptor *sd = [MTLTextureDescriptor
+                textureCubeDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm size:4 mipmapped:NO];
+            sd.storageMode = MTLStorageModeShared;
+            id<MTLTexture> src = [dev newTextureWithDescriptor:sd];
+            for (int f = 0; f < 6; f++) {
+                uint32_t texels[16];
+
+                for (int i = 0; i < 16; i++)
+                    texels[i] = face[f];
+                [src replaceRegion:MTLRegionMake2D(0, 0, 4, 4) mipmapLevel:0 slice:f withBytes:texels
+                       bytesPerRow:16 bytesPerImage:64];
+            }
+            MTLSamplerDescriptor *smp = [MTLSamplerDescriptor new];
+            smp.minFilter = smp.magFilter = MTLSamplerMinMagFilterNearest;
+            [enc setVertexTexture:src atIndex:0];
+            [enc setVertexSamplerState:[dev newSamplerStateWithDescriptor:smp] atIndex:0];
+        }
         if (v->flags & RV_DEPTH) {
             MTLDepthStencilDescriptor *dsd = [MTLDepthStencilDescriptor new];
             dsd.depthCompareFunction = MTLCompareFunctionLess;
@@ -612,6 +785,13 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
         logf_(@"render: committing");
         [cb commit];
         [cb waitUntilCompleted];
+        // What iOS actually drew: the hooks are not in yet in this render
+        if (r == 0 && repeat && !(v->flags & RV_LINEAR_TARGET)) {
+            NSMutableData *px = [NSMutableData dataWithLength:4 * v->width * v->height];
+            [tex getBytes:px.mutableBytes bytesPerRow:4 * v->width
+               fromRegion:MTLRegionMake2D(0, 0, v->width, v->height) mipmapLevel:0];
+            [px writeToFile:[dir stringByAppendingPathComponent:@"pixels.raw"] atomically:YES];
+        }
         if (r < repeat && (r < 4 || r % 25 == 0 || cb.status != MTLCommandBufferStatusCompleted))
             logf_(@"render %d: status %ld, %u traps, %.2f ms", r, (long)cb.status,
                   gTotalTraps - traps, (CFAbsoluteTimeGetCurrent() - t0) * 1e3);
