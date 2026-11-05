@@ -1052,11 +1052,13 @@ or linear: exact texels with nearest filtering, blends with linear.
 
 - **Sample instruction** (offline probes `tools/isa/probes/tex2.metal`,
   then `pvr-tri TRI_TEX_F32`): `f518` writes the result as the colour
-  halves, `f51a` as f32 into r[dst]..r[dst+3] (W1 `0x0100 | 2·dst`).
-  W2 = `0x8100 | state dword << 8 | sampler dword` (iPadOS's second
-  texture: `0x8910`, state at 8, sampler at 16). Which texture/sampler is
-  bound is only the driver's DMA: Metal shaders with texture(1) or
-  sampler(1) compile to identical code.
+  halves, `f51a` as f32 into r[dst]..r[dst+3]. W1 = `0x0100 | 2·dst |
+  (state dword / 2) << 9`, W2 = `0x8100 | coordinates' register << 9 |
+  sampler dword`. For n textures Apple's layout is state t at dword 8t and
+  sampler t at 8n + 2t (metal-tt, 2026-11-05; an earlier reading of `0x8910`
+  as "state in W2" was wrong, and is why only state at dword 0 worked). See
+  ISA.md "Sampling". Which texture/sampler is bound is only the driver's DMA:
+  Metal shaders with texture(1) or sampler(1) compile to identical code.
 - **Coordinates**: an iterate with W2 `0x8000` passes them straight to the
   sampler (exact and deterministic, with the varying declared vec2 or
   vec4). Otherwise the sample reads f32 r0-r1: Apple's code for

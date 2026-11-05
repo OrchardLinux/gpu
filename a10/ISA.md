@@ -250,6 +250,10 @@ reload the module between such tests.
   iPadOS's `0x1081` (4 units) gives r0-r7; Mesa's first vertex shader
   used r0-r10 and hung until the field was 6 (`0x1881`; 5 still hangs).
   Found by running Mesa's code in `pvr-tri` (`TRI_VS_HEX`, `TRI_VDM5`).
+  The field's unit is 2, but round the count up to a multiple of 4: vertex
+  shaders of 17 and 18 registers drew wrong values with the field covering
+  them, and the same shaders passed at 20, 24 and 32 (four dEQP tests,
+  2026-11-05; why is not known).
 - Lesson: `pvr-tri` places programs at fixed offsets; a fragment shader
   longer than its slot ran into the vertex shader and hung the GPU, which
   looked like an encoding failure.
@@ -257,6 +261,52 @@ reload the module between such tests.
 Vertex shaders in these probes load their inputs from a buffer with the
 register-indexed address/load forms (`1189 …`, `3b10 …`): vertex inputs are
 plain memory loads here.
+
+## Source reach below r16 (dEQP-GLES2, 2026-11-05, A10)
+
+Measured in vertex shaders on the A10. Another chip may differ, so test this
+early on a new board: it shows up as wrong values, not as a hang or an error.
+
+- **One source with an immediate reaches r15 only:** `1189` (address index),
+  `1199` (add immediate, conversions, moves), `1181` (compare with immediate)
+  and `199e` (shift). Their source sits at bit 10 of the word. Reading r16
+  through `1199 0312 4101 0120 09a1 0070` gave wrong values, with no fault.
+- **Two-source forms (`3199`, `3181`) reach the higher registers:** a move from
+  r16 is `3199 dst 4140 00ce` (OR with itself). Vertex shaders of 20 to 23
+  registers pass dEQP this way.
+- **Memory address pairs must lie below r16:** a pair across r16 read the wrong
+  memory.
+- **Put the mask stack in r15 at most:** above it, vertex shaders drew wrong
+  values or hung the geometry job.
+- **Registers above r31 work in vertex shaders too,** through the forms in
+  "Registers above r31" with W0 `3199`. Forcing values into r16-r29 passes dEQP.
+- Fragment code uses a different encoding and is not covered by these limits.
+  Compute was not measured; Mesa treats it like vertex code.
+
+Mesa: `one_src()`, `low_reg()` and `alloc_pair()` in `g9p_compile.c`.
+
+## Sampling (metal-tt, tested on dEQP, 2026-11-05)
+
+Compile the Metal equivalent with `metal-tt -arch applegpu_g9p` before guessing
+at an encoding: it answered all of this in minutes. The pipeline file must be
+named `*.mtlp-json`.
+
+| Words | Meaning |
+|---|---|
+| `f51a W1 W2 0700 0200` | fragment sample; W1 and W2 as in RENDER.md "Textures" |
+| `f51a W1 W2 07c0\|r 0280` | explicit level from r, fragment (`07a0\|r`: bias) |
+| `f51a W1 0100\|c<<9\|s 07c0\|r 8180 0108 0010` | vertex sample, level from r, coordinates in r[c].. |
+| `fd1a ...` | cube; in a vertex shader W2 also has bit 15 |
+| `7d08 0100\|dst_half 8000` | cube op, direction in r0-r2 (`8400` in a vertex shader) |
+
+- **Level and bias are f16,** read from the low half of the register. Apple
+  converts first (`1189 dst 0101|s<<10 01a0 0b44 0070`). An f32 there gives wrong
+  values and looks right only at level 0.
+- **In a vertex shader, writes to r0-r3 use W1 `0x01..`** and writes above use
+  `0x03..` in Apple's code, and in `1199` the first register operand has the
+  0x80 flag. Why is not known.
+- **Open:** cube samples in vertex shaders give results that depend on the
+  vertex instance count, so some vertices are wrong.
 
 ## Fragment register bank (`probes/fsops.metal`, `fsbranch.metal`, 2026-10-31, TESTED)
 

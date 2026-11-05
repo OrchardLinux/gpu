@@ -902,8 +902,8 @@ clients' own pages) and `ls -l /proc/<compositor>/fd | grep dmabuf`.
 
 ## Conformance and ES 3 (2026-11-03)
 
-No dEQP or Vulkan CTS run yet. The tools are ready, not yet run on the device:
-`tools/a10/mesa/build-deqp.sh MESA_DIR tools/a10/out` builds the GLES CTS
+dEQP-GLES2 results and method: "GLES 2 with dEQP" below. No Vulkan CTS, GLES 3
+or `KHR-GLES2` run yet. The tools: `tools/a10/mesa/build-deqp.sh MESA_DIR tools/a10/out` builds the GLES CTS
 release and patches Mesa CI uses (`deqp-gles2/3/31`, `glcts`) in a tmpfs,
 `deqp-deploy.sh` copies it to the installed Omarchy A (A10 overlay applied,
 so it tests the stack we ship: Arch's Zink on the fork's Vulkan driver), and
@@ -923,12 +923,115 @@ Compiler gaps (the "not supported yet" paths of `g9p_compile.c` and
 `pvr_arch_g9p_gfx.c`): derivatives (the theme and background pickers run on
 llvmpipe because of them), discard inside control flow, some fragment
 inputs and outputs, subpass input loads, register spilling (above 32
-registers), UBOs and dynamic buffers, 16-bit registers, workgroup ID z,
+registers),
+16-bit registers, workgroup ID z,
 indirect dispatch and base groups, `firstInstance`, some vertex formats and
-divisors, sampler address modes. No partial renders: a scene that runs out
+divisors. No partial renders: a scene that runs out
 of parameter memory hangs the GPU (hence the 32 MiB pool). Quickshell on
 the GPU hung the A10 on 2026-11-02 (cause unknown); the shell stays on
 Qt's software renderer.
+
+## GLES 2 with dEQP (2026-11-05, Mesa fork `g9p-gles2`)
+
+Not finished. On a seeded 10% sample of the must-pass list (1,716 of 17,165
+tests): 1,634 pass, 18 not supported, 64 fail, no GPU hangs, at `ce79827cd1f`.
+Largest open group: wrong LOD at primitive edges (below). Not tested on the GPU
+desktop yet.
+
+### Method, for any board
+
+- **The list:** `mustpass/gles2-main.txt`, plus `gles2-khr-main.txt` (not run
+  yet). Not supported counts as OK only for a feature the driver does not offer.
+- **Do not start with the full suite.** Run a seeded 10% sample, fix, and rerun
+  only what failed; keep the full run for the end.
+- **After a hang the process has lost its device,** and every later test in it
+  fails. The runner restarts on `VK_ERROR_DEVICE_LOST`, and kills the hung
+  process on the device: left alive they filled the tablet's memory.
+- **Sort failures before reading them:** `G9P_DEBUG=1` shows compile errors and
+  register counts, and many "wrong pixels" were shaders that never compiled.
+- **Ask `metal-tt` first** for any encoding question (ISA.md "Sampling").
+- **Step through draws** with a temporary "stop after N draws" switch when a
+  random test fails: read the same pixel at each N.
+- **Read one failing program before forming a theory.** Compare rendered and
+  reference pixels first: colours rotated by one step meant a loop one iteration
+  off. What looked like "r16 and up are broken" was four separate causes
+  (`ISA.md` "Source reach below r16", the register count, a compiler bug in
+  deferred compares, shaders running out of low registers).
+- **Check that the build really installed.** A stopped Podman VM once failed
+  builds quietly and invalidated a round: compare the installed library's hash.
+
+### Zink on this GPU
+
+`ZINK_DEBUG=rp` (render-pass tracking for tilers) is needed: without it Zink
+splits renders, and those depend on the broken depth/stencil reload below. Zink
+turns it on by itself only for certain driver IDs, not for ours. The test runner
+sets it. The desktop session needs it too (not done or tested yet).
+
+### Image state and sampler (A9 layout from PR #4, works on the A10)
+
+Image state, bits counted across its first 128 bits: layout bits 0-2 (2 2D,
+3 array, 6 cube), twiddled bit 3, format from bit 8, swizzle R, G, B, A at bits
+15, 18, 21, 24 (4 one, 5 zero), width-1 at bit 27, height-1 at bit 41, base level
+at bit 57. From bit 64: address >> 1, with the last level in its low bits 0-3 and
+0x10 when the image has mips. Bit 111: layers-1 for arrays (pitch/64-1 for linear
+images). Bit 125: layer stride rounded to 16 KiB instead of 64 bytes. Arrays and
+cubes are always twiddled. Width and height are level 0's, with the chain's base
+address. Mesa: `pvr_arch_g9p_gfx.c`, just before `words[0]` is filled in.
+
+Sampler word: min LOD bits 0-9, max LOD bits 10-19 (1/64 units, at most 896),
+mag linear 23, min linear 25, mip nearest 27, mip linear 28, address modes at
+29, 32, 35 (0 clamp, 1 repeat, 2 mirror, 3 border), high half `0x00c00780`.
+
+Open: cube faces show seam strips.
+
+### Depth and stencil (A10)
+
+- **Clears:** a depth/stencil clear with no colour needs tag writes on and the
+  translucent pass (`0x03cc0000` with stencil, `0x03c40000` without, pass 1).
+- **D16 depth clear value is a float** like the others: as 65535 every LESS failed.
+- **Depth bias** uses Rogue's table, index and ISPCTL bit, with its D16 scale of 512.
+- **Stencil clear value:** `ISP_BGOBJVALS` does not set stencil on this path, so
+  a non-zero stencil clear is drawn with the first draw. Forcing that clear for
+  zero values, or once per dynamic render, made every test fail and hung.
+- **Reload from memory is broken:** the store writes only about 96 of 4096 words.
+  The twiddled store (bit 17) hangs. `loadtwiddled` (bit 13), `fb_loaden`,
+  `fb_storeen`, `mloaden`, `mstoreen` and pixel extents do not help. A real fix
+  probably needs an iOS capture. `ZINK_DEBUG=rp` avoids needing it.
+
+### Vertex register pressure
+
+Allocate low registers first; most shaders never get past r15. A vertex shader
+that runs out compiles again with values above r15 and r11-r14 kept free for
+address work, parking values above r31 if needed, then once more repeating loads
+and scheduling by register pressure.
+
+### Bugs that looked like hardware limits
+
+Each of these first looked like "high registers are broken":
+
+- A compare moved to its branch read a NIR register after a later store, so loops
+  ran one iteration short.
+- A low copy of one source landed on the other source's register, just freed by
+  the release: copy before releasing.
+- 16 buffer slots: each vertex binding takes two (address and stride).
+
+### The tile is not clamped
+
+The tile holds what the last shader wrote, unclamped until it is written to
+memory. A blend that goes negative stays negative, so a later framebuffer fetch on
+a unorm target must clamp the value it reads. Also, a draw with a colour mask of 0
+must still read the tile: with no read it runs opaque, over what is there. Together
+these took dEQP fragment_ops interaction and random from 64 to 200 of 200.
+
+### Open: wrong LOD at primitive edges
+
+Largest open problem. Where a 2x2 quad reaches outside the primitive, the LOD is
+far too high: a ring of wrong mip levels on the viewport's edge rows and columns
+when its position is odd. With triangle merging off (`SIZEINFO2` bit 14) the
+diagonal shows it too, so it is every primitive edge, not the viewport. It is not
+the scissor (removed entirely: no change), the pass type, sample rate, or register
+versus straight iterate. Apple's shader code is identical to ours, so the
+difference is in state that a capture of an iOS mipmapped draw would show.
 
 ## Roadmap (2026-11-03)
 
