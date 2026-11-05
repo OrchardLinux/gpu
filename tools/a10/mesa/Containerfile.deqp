@@ -1,0 +1,10 @@
+# dEQP build image (arm64), Debian unstable like the device chroot /run/sid.
+# llvmpipe is here only so build-deqp.sh can smoke test the binaries.
+# Build: podman build -f Containerfile.deqp -t orchard-deqp:sid
+FROM docker.io/library/debian:sid
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake ninja-build pkgconf python3 git ca-certificates curl \
+        libegl-dev libgles-dev libgl-dev libgbm-dev libdrm-dev zlib1g-dev libpng-dev \
+        libwayland-dev wayland-protocols \
+        libegl-mesa0 libgles2 libgl1-mesa-dri \
+    && rm -rf /var/lib/apt/lists/* /usr/share/doc /usr/share/man /usr/share/locale

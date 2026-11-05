@@ -902,7 +902,17 @@ clients' own pages) and `ls -l /proc/<compositor>/fd | grep dmabuf`.
 
 ## Conformance and ES 3 (2026-11-03)
 
-No dEQP or Vulkan CTS run yet. On the A10, Zink offers OpenGL ES 2.0 and
+No dEQP or Vulkan CTS run yet. The tools are ready, not yet run on the device:
+`tools/a10/mesa/build-deqp.sh MESA_DIR tools/a10/out` builds the GLES CTS
+release and patches Mesa CI uses (`deqp-gles2/3/31`, `glcts`) in a tmpfs,
+`deqp-deploy.sh` copies it to the installed Omarchy A (A10 overlay applied,
+so it tests the stack we ship: Arch's Zink on the fork's Vulkan driver), and
+`deqp-run.py run SUITE RESULTS.csv [--gles-override 3.0|3.1]` runs it from
+the Mac: results are written per test on the Mac, a crash or hang is recorded and skipped, and a
+rerun continues after a reboot. Under an override the result is a gap list,
+not conformance.
+
+On the A10, Zink offers OpenGL ES 2.0 and
 desktop GL 2.1 (`eglinfo -B`). Mesa's ES 3.0 check (`compute_version_es2`)
 fails only on texture formats the G9P format table does not decode yet:
 float and half-float textures, RG, integer, snorm, RGB9E5, R11G11B10,
