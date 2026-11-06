@@ -1043,19 +1043,22 @@ level z layer pitches on, a layer holding the whole 2D chain when the image has 
 It is not 3D Morton order. Layout 5, slice count in the layers' field (bit 111), `fb1a`
 samples. Before this the GPU hung repeatedly, enough to take the tablet down.
 
-### Results on 2026-11-06 (Mesa `441384c3f10`)
+### Results on 2026-11-06 (Mesa `734c638246f`)
 
-`gles2-main`: 17,137 of 17,165 OK (16,972 pass, 112 not supported, 53 quality warnings),
-27 fail, 1 hang. `gles2-khr-main`: 468 of 473. Files `full-10.csv`, `khr-3.csv`. The next
-commit (`734c638246f`) also passes `tmp_array` (3), in a partial run, so 25 should remain.
+`gles2-main`: 17,140 of 17,165 OK (16,975 pass, 112 not supported, 53 quality warnings),
+24 fail, 1 hang. `gles2-khr-main`: 468 of 473, one of them a crash. Files `full-11.csv`,
+`khr-4.csv`, no regressions.
 
 Open:
 
 - **Depth/stencil reload:** 21 `fbo.render` tests, below. Probably also `clip_control` (2,
   its second image compares depth) and KHR `internalformat` (4), which sample depth; those
   are not confirmed to share the cause.
-- **`uniform_api.random.79`** (black output, 38 KB shaders) and **`.80`** (correct image, but
-  the fragment job never stamps, one GPU reset, later tests still pass). Not understood.
+- **`uniform_api.random.79`:** black output, reproducible alone; 38 KB shaders, a struct of
+  uniforms. The PDS size fields are in range. Not understood.
+- **`uniform_api.random.80`:** hangs only in the suite's batch (job 399 of that process, right
+  after `.79`), and passes alone with no reset, so `.79` may be what leaves it broken. That
+  reset does not wedge the GPU.
 - **KHR `texture_3d.filtering.combinations.negative`:** wrong error code.
 
 ### Non-seamless cube maps (for any G9P board)
@@ -1110,10 +1113,14 @@ Tested on fresh boots, unless noted:
 
 The wrong pixels of the linear reload form a 32-pixel tile pattern. Our words match iOS's
 at ZLSCTL, `ISP_ZLS_PIXELS` and the bases, so the cause is elsewhere in the render record.
-Not yet compared word for word: the record differs between iOS and our kernel. One unknown:
-a word after the iOS clear values is `01000000` in `dsreload*`, 0 in `depth`, and the word
-before it is `0x100` on load passes. Next: map those to firmware registers (Start3D's table
-in RENDER.md), and write them. Patches: `tools/a10/out/deqp-results/session-tools/ds-wip*.patch`.
+The iOS record's layout differs from the one our kernel builds, so it cannot be compared
+word for word. Two iOS words are unmapped: after the clear values, `01000000` in every
+`dsreload*` capture and 0 elsewhere, and before it `0x100` on load passes. They do not explain
+the hang: the `depth` capture stores twiddled with both 0. `0xf48` has no write mask.
+
+Next: a tool below dEQP. Run the iOS `depth` render through `pvr-tri` with only the twiddled
+store added, and read the GPU's fault registers after the hang (the kernel prints only
+stamps). Patches: `tools/a10/out/deqp-results/session-tools/ds-wip*.patch`.
 
 `ZINK_DEBUG=rp` avoids needing reload in most applications.
 
