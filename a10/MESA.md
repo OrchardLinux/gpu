@@ -1054,6 +1054,8 @@ Open:
 - **Depth/stencil reload:** 21 `fbo.render` tests, below. Probably also `clip_control` (2,
   its second image compares depth) and KHR `internalformat` (4), which sample depth; those
   are not confirmed to share the cause.
+- **Note:** the driver's D16, S8 and D32F_S8 words are wrong in this commit (aliasing, below), so
+  these numbers were reached with those.
 - **`uniform_api.random.79`:** black output, reproducible alone, and it resets the GPU (the
   count rose by one after running it alone, so the job hangs); 38 KB shaders, a struct of
   uniforms. The PDS size fields are in range. Not understood.
@@ -1084,6 +1086,16 @@ state keeps the unlowered shader. Instead the driver keeps the extension and:
 
 ### Depth/stencil reload: still not working
 
+**Read this first: an aliasing bug hid every result before 2026-11-07.** `g9p_ds_zls()` packs
+ZLSCTL with `pvr_csb_pack()` through a `uint64_t *`. The pack writes dwords, so under strict
+aliasing the compiler keeps the variable's old value, from `g9p_zlsctl()`. So in commit
+`734c638246f` and everything before it, **the word `g9p_ds_zls()` builds never reaches the
+hardware**: D16 has no format bits, S8 sends 0 and stores nothing, D32F_S8 never stores stencil.
+A printf in the block or a pack into `uint32_t[2]` + `memcpy()` makes it take effect. The fix is
+not committed: the correct words on the linear path hang `depth_stencil_clear.*` and more (48
+regressions, `d16-fix-try1.patch`), because the suite has only ever passed with the wrong word.
+The table of hangs in earlier versions of this section was measured with the bug and is void.
+
 iOS words (captures `dsreload*-r1`, each reload verified by its pixels):
 
 | Format | Store | Load |
@@ -1093,48 +1105,37 @@ iOS words (captures `dsreload*-r1`, each reload verified by its pixels):
 | D16 | `050a2004` | `0502a002` |
 | S8 | `00062004` | `00026002` |
 
-From these and PR #6's `pvr_g5p_ds.c`: load and store twiddled (bits 13, 17) with the
-extents in ZLSCTL left 0; `ISP_ZLS_PIXELS` (`(w-1) | (h-1) << 15`, our 0xfd8 word) sizes the
-surface, aligned to 32 with a stencil plane or a side under 32; each plane is Morton order
-over a power-of-two square of 32-pixel tiles; stencil follows depth at a 16 KiB boundary.
-Firmware record: depth base at the first two of four slots 0x28 bytes apart, stencil | 1 at
-the last two (load slot empty when that aspect is not used).
+From these and PR #6's `pvr_g5p_ds.c`: load and store twiddled (bits 13, 17) with the extents in
+ZLSCTL left 0; `ISP_ZLS_PIXELS` (`(w-1) | (h-1) << 15`, our 0xfd8 word) sizes the surface,
+aligned to 32 with a stencil plane or a side under 32; each plane is Morton order over a
+power-of-two square of 32-pixel tiles; stencil follows depth at a 16 KiB boundary.
 
-Tested on fresh boots, unless noted:
+With the aliasing fix and these words (`ds-wip5.patch`, `G9P_T_TW=1`, config `rgba8888d0s0ms0` to
+leave the default framebuffer's depth out, 128x128 FBOs):
 
-| Change | Result |
+| Job | Result |
 |---|---|
-| `ISP_ZLS_PIXELS` for stencil-only attachments | Committed. Safe, no pass on its own |
-| Extents 0 in ZLSCTL, linear | Safe, reload still fails |
-| Twiddled store and load | **Hangs the first fragment job** |
-| ... with a 64x64 surface, as iOS | Hangs |
-| ... storing both planes, as iOS | Hangs |
-| ... without empty-tile processing | Hangs |
-| iOS memory layout (`ds-wip2.patch`), no twiddling | Hung on one boot, on the same test with the layout switched off, which the clean driver passes. **Unexplained, retest** |
+| D16 store `050a2004` | No hang, test passes |
+| S8 store `00062004` | No hang, test passes |
+| S8 load `00026002` | No hang, but the reload has no effect (the stencilled rectangle is missing) |
+| D16 load `0502a002` | **Hangs the job**, also with a 4x larger image, and with empty tiles processed |
 
-The wrong pixels of the linear reload form a 32-pixel tile pattern. Our words match iOS's
-at ZLSCTL, `ISP_ZLS_PIXELS` and the bases, so the cause is elsewhere in the render record.
-The iOS record's layout differs from the one our kernel builds, so it cannot be compared
-word for word. Two iOS words are unmapped: after the clear values, `01000000` in every
-`dsreload*` capture and 0 elsewhere, and before it `0x100` on load passes. They do not explain
-the hang: the `depth` capture stores twiddled with both 0. `0xf48` has no write mask.
+**The store writes almost nothing.** Dumping the image at `vkDestroyImage` (`G9P_T_DUMPZ=1`): S8 48
+non-zero bytes, D16 14, all in the image's first 100 bytes, of 16-32 KiB; linear stores similar
+(224 u16 in the first row). Not understood: possibly unflushed writes, or only what geometry
+touched. This looks like the next thing to explain, before the load. Not yet checked with D32F.
 
-What the hang looks like (`modprobe powervr exp_hw_support=1 apple_fw_debug=3` prints the
-firmware's trace at a hang): the job starts (event 0x11), then events 0x02, 0x04, 0x03, then only
-what looks like idle ticks (0x12 for ids 1-3, 0x01, 0x00), and "fragment retired" counts it. So
-the firmware seems idle and the hardware's completion never arrives. No baseline trace yet:
-the kernel prints it only at a hang. `0x20100e150` (MMU fault, read with `/dev/mem`) read 0 during
-and after the hang, **but so did `0xe148`, which should be non-zero, so these reads may
-mean the GPU was powered down, not that there was no fault.** Validate the read on a running job
-first. PR #6 (A9) has the same words and no note of this hang.
+Also tested on the trace: `apple_fw_debug=3` prints the firmware's events at a hang: job start
+(0x11), 0x02, 0x04, 0x03, then idle-looking 0x12/0x01/0x00. `0x20100e150` (MMU fault) reads 0 during
+a hang with `power/control` = `on`; `0xe148` also read 0, so that is not conclusive. `0xf48` has no
+write mask. iOS's `0x100` on load passes is not 0x6d0 (values tried: no effect).
+Test harness: `session-tools/mx.sh`, `good.sh`.
 
-Patches: `tools/a10/out/deqp-results/session-tools/ds-wip*.patch`.
-
-`ZINK_DEBUG=rp` avoids needing reload in most applications.
-
-**After any GPU hang, stop and reboot.** A hang in the depth/stencil path wedges the GPU; a
-driver reload (`rmmod`, `modprobe`) does not recover it, and known good drivers then fail.
-The `uniform_api.random.80` reset does not wedge it. Check `dmesg` for "resetting" per test.
+**A GPU hang needs no reboot.** Wait for the hung process to end and for
+`/sys/devices/platform/soc/201000000.gpu/power/runtime_status` to read `suspended` (about 1 s
+idle powers the domain off), then known-good tests pass (measured 2026-11-06). A test started
+earlier overlaps with the hung process's next timeout and looks like a wedged GPU, which is why
+earlier notes said to reboot. Count `resetting the GPU` per test.
 
 ## Roadmap (2026-11-03)
 
