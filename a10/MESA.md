@@ -1110,26 +1110,31 @@ ZLSCTL left 0; `ISP_ZLS_PIXELS` (`(w-1) | (h-1) << 15`, our 0xfd8 word) sizes th
 aligned to 32 with a stencil plane or a side under 32; each plane is Morton order over a
 power-of-two square of 32-pixel tiles; stencil follows depth at a 16 KiB boundary.
 
-With the aliasing fix and these words (`ds-wip5.patch`, `G9P_T_TW=1`, config `rgba8888d0s0ms0` to
-leave the default framebuffer's depth out, 128x128 FBOs):
+**`ISP_AA` is what makes the ZLS store (found 2026-11-07).** With mode 0, which we always sent,
+stores write almost nothing in either layout, whatever the extents, `ISP_ZLS_PIXELS`, `ISP_CTL`,
+cache mode or spare ZLSCTL bits say: D16 linear 192 bytes of 8192, twiddled 28. Mode 1 on the
+**linear** path stores the plane and leaves colour exact (D16 8320 bytes, D32F 16384, real values).
+Modes 2 and 3 break colour. Twiddled with mode 1 writes only 1024 bytes, so linear is the path
+that works here, unlike iOS's twiddled words. iOS also sets D16's clear as the integer `0000ffff`.
 
-| Job | Result |
-|---|---|
-| D16 store `050a2004` | No hang, test passes |
-| S8 store `00062004` | No hang, test passes |
-| S8 load `00026002` | No hang, but the reload has no effect (the stencilled rectangle is missing) |
-| D16 load `0502a002` | **Hangs the job**, also with a 4x larger image, and with empty tiles processed |
+With mode 1 on the linear path, in dEQP: all D16 `shared_depthbuffer`, `recreate_colorbuffer`
+and `shared_colorbuffer` pass. Not yet exact:
 
-**The store writes almost nothing.** Dumping the image at `vkDestroyImage` (`G9P_T_DUMPZ=1`): S8 48
-non-zero bytes, D16 14, all in the image's first 100 bytes, of 16-32 KiB; linear stores similar
-(224 u16 in the first row). Not understood: possibly unflushed writes, or only what geometry
-touched. This looks like the next thing to explain, before the load. Not yet checked with D32F.
+- **The layout is not simply linear.** PR #6's `depth-vk reload` (64x64 D32F): stored pixels are
+  displaced by +16 words, and on reload tile 1 reads the same memory as tile 0, so 1024 pixels are
+  wrong. dEQP's tests happen not to see it. Moving the base by 64 bytes centres the store but does
+  not fix the load (store and load move together). Mode 2/3 on the load job only: worse.
+- **S8 reload still fails** (`recreate_colorbuffer.rebind_*_stencil_index8`, 7 tests). Its row stride
+  is half the width (64 at 128 wide), and it follows the X of `ISP_ZLS_PIXELS`.
 
-Also tested on the trace: `apple_fw_debug=3` prints the firmware's events at a hang: job start
-(0x11), 0x02, 0x04, 0x03, then idle-looking 0x12/0x01/0x00. `0x20100e150` (MMU fault) reads 0 during
-a hang with `power/control` = `on`; `0xe148` also read 0, so that is not conclusive. `0xf48` has no
-write mask. iOS's `0x100` on load passes is not 0x6d0 (values tried: no effect).
-Test harness: `session-tools/mx.sh`, `good.sh`.
+Why mode 1 works is not understood. The kext builds these registers from the userspace record;
+fields differing with depth there: `+0x4d0` clear, `+0x4dc` 0x100 on load passes, `+0x4e0`
+`01000000` with depth/stencil, `+0x4e4` `00010000` for D16, `+0x2e8` ZLSCTL, depth and stencil addresses
+at `+0x308`, `+0x330`, `+0x358`, `+0x380`, `+0x5d0`, `+0x5e0`. The kext's handling is unread.
+
+Tools, all in `session-tools/`: `depth-vk` from PR #6 with a stored-map print (source in the
+scratchpad, patch to redo), `pv.sh`, `dv.sh`, `mx.sh`, `zs.sh`, patches `ds-wip*.patch` with
+switches `G9P_T_*`.
 
 **A GPU hang needs no reboot.** Wait for the hung process to end and for
 `/sys/devices/platform/soc/201000000.gpu/power/runtime_status` to read `suspended` (about 1 s
