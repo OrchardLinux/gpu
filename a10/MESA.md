@@ -1043,19 +1043,16 @@ level z layer pitches on, a layer holding the whole 2D chain when the image has 
 It is not 3D Morton order. Layout 5, slice count in the layers' field (bit 111), `fb1a`
 samples. Before this the GPU hung repeatedly, enough to take the tablet down.
 
-### Results on 2026-11-06 (Mesa `734c638246f`)
+### Results on 2026-11-07 (Mesa `c44de203bcc`)
 
-`gles2-main`: 17,140 of 17,165 OK (16,975 pass, 112 not supported, 53 quality warnings),
-24 fail, 1 hang. `gles2-khr-main`: 468 of 473, one of them a crash. Files `full-11.csv`,
-`khr-4.csv`, no regressions.
+`gles2-main`: 17,154 of 17,165 OK (16,989 pass, 112 not supported, 53 quality warnings), 10 fail,
+1 hang. `gles2-khr-main`: 468 of 473, one a crash. Files `full-13.csv`, `khr-5.csv`, no regressions.
 
 Open:
 
-- **Depth/stencil reload:** 21 `fbo.render` tests, below. Probably also `clip_control` (2,
-  its second image compares depth) and KHR `internalformat` (4), which sample depth; those
-  are not confirmed to share the cause.
-- **Note:** the driver's D16, S8 and D32F_S8 words are wrong in this commit (aliasing, below), so
-  these numbers were reached with those.
+- **S8/stencil reload** (7, `recreate_colorbuffer.rebind_*_stencil_index8`), below. Not S8-specific:
+  they fail the same way with D32F_S8.
+- **Depth textures** (`clip_control` 2, KHR `internalformat` 4): sampling depth is not implemented.
 - **`uniform_api.random.79`:** black output, reproducible alone, and it resets the GPU (the
   count rose by one after running it alone, so the job hangs); 38 KB shaders, a struct of
   uniforms. The PDS size fields are in range. Not understood.
@@ -1117,8 +1114,16 @@ cache mode or spare ZLSCTL bits say: D16 linear 192 bytes of 8192, twiddled 28. 
 Modes 2 and 3 break colour. Twiddled with mode 1 writes only 1024 bytes, so linear is the path
 that works here, unlike iOS's twiddled words. iOS also sets D16's clear as the integer `0000ffff`.
 
-With mode 1 on the linear path, in dEQP: all D16 `shared_depthbuffer`, `recreate_colorbuffer`
-and `shared_colorbuffer` pass. Not yet exact:
+Mode 1 rasterizes with two samples, so **the sample positions (0xfa8) must be `0x8888`**, both at the
+pixel centre, or every edge differs (136 regressions in `clipping`, `fragment_ops.random`). With
+that it renders as mode 0 does, and all D16 `shared_depthbuffer`, `recreate_colorbuffer` and
+`shared_colorbuffer` pass.
+
+**This is a workaround, not iOS's recipe.** Mode 0 must need something else the kext sets. Not yet exact:
+
+- **Above 64 pixels the store is incomplete:** at 128x128, D32F writes 33,536 of 65,536 bytes and a
+  64x64 stencil rect stores 2,048 of 4,096 values, in a block of stride 64. Doubling the X and Y of
+  `ISP_ZLS_PIXELS` does not fix it.
 
 - **The layout is not simply linear.** PR #6's `depth-vk reload` (64x64 D32F): stored pixels are
   displaced by +16 words, and on reload tile 1 reads the same memory as tile 0, so 1024 pixels are
