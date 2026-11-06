@@ -1059,8 +1059,32 @@ renderer at the start and the render node before every batch.
   record +0x6dc; not found on the A10 yet. Values tried in 0x6d0 and 0x3e00 did not help.
 - An output register read right after an ALU write gives 0 in the first task of each tile: write it
   once, last.
-- Open, by size in the sample: transform feedback (`pvr_xfb` asserts; PR #6 has `pvr_g5p_xfb.h`),
-  shadow textures (depth sampling), derivatives on float targets, texture functions.
+- Rasterizer discard was ignored; fixed (`rasterizer_discard.basic` 17/17).
+- **Transform feedback: bookkeeping works, data does not.** PR #6's CPU side is ported (counters,
+  overflow, stream queries), and capturing vertex shaders store after their outputs with
+  `2310 .. 8800` as Apple's. A one-vertex draw captures exactly. In a larger draw the first vertex
+  of the job is right and the others land at the right address with wrong data: zeros or junk, also
+  when the stored register is the address pair itself, so the address is read correctly and the data
+  is not. Ruled out: register count (13 and 29 alike), low data registers, one point per draw, `8000`
+  and `2312` forms (worse), `004d`/`024d` and a load after the stores. MAX_INSTANCES 1 hangs the
+  geometry job. PR #6 is exact on the A9 with attributes fetched by PDS. Next: an iOS capture of a
+  vertex shader that stores, for the PDS kick and task state.
+- **Compare samples** (Apple's `sample_compare`, metal-tt): bit 15 of W3, W4 `0x40 | half` of the
+  reference. The sampler's compare function is bits 39-41 (0 lequal, 1 gequal, 2 less, 3 greater,
+  4 equal, 5 notequal, 6 always, 7 never), enable bit 42; the layout matches Apple's later GPUs. D16
+  and D32F pass with every function. D32F_S8 sampled as RG32's first channel still fails: its own
+  image key is unknown.
+- **Texel offsets:** bit 14 of W2; an immediate `0188|z<<12 0100|half 0101|(v&0x3f)<<1
+  0120|(v>>6)<<1 0128 0039` with `v = x&15 | (y&15)<<4` in the half that W4 names, in the register
+  after a compare reference.
+- Size queries in all dimensions at the view's base level (bits 25-28 of d1). In vertex shaders they
+  still return wrong values, which also fails vertex tests of offsets and gradients. Reason unknown.
+- Vector `dFdx`/`dFdy` and a break ending a loop body (a switch's last case) compile now.
+- 1-in-40 sample at Mesa `0bc9604815d`: 1,022 of 1,109 (92.2%), no regressions.
+- Open, by size in the sample: transform feedback data (25), fragment_out (11: three or more targets,
+  RGBA32; includes hangs), builtin precision (6), texture functions in vertex shaders (5),
+  derivatives on multisampled and RGBA32 targets (5), compressed `texture.wrap` (4), D32F_S8
+  shadow (4), occlusion query hangs (2), `gl_FragDepth` written in a loop.
 
 ### Results on 2026-11-07 (Mesa `c44de203bcc`)
 
