@@ -364,6 +364,8 @@ enum {
     RV_STENCIL = 1024,      // dsreload: Depth32Float_Stencil8, stencil kept too
     RV_D16 = 2048,          // dsreload: Depth16Unorm
     RV_S8 = 4096,           // dsreload: Stencil8 only
+    RV_MSAA = 8192,         // 4 samples, resolved into the target
+    // bits 16-18: kind 18's target count
 };
 
 // Each variant changes one parameter of "base", so diffs isolate its fields.
@@ -415,9 +417,81 @@ static const RenderVariant kVariants[] = {
     {"dsreloads8", 64, 64, 6, 1, {0, 0, 0, 1}, NO, "", 11, RV_S8 | RV_STENCIL},
     // A cube map sampled in the vertex shader
     {"vscube", 64, 64, 30, 1, {0, 0, 0, 1}, NO, "", 12},
+    // Vertex shaders that store to memory: drawn, without rasterization, and the
+    // same shader without the store, for the diff (transform feedback)
+    {"store", 64, 64, 30, 1, {0, 0, 0, 1}, NO, "", 13},
+    {"storenr", 64, 64, 30, 1, {0, 0, 0, 1}, NO, "", 14},
+    {"storeref", 64, 64, 30, 1, {0, 0, 0, 1}, NO, "", 15},
+    // A compare sample of Depth32Float_Stencil8, and of Depth32Float for the diff
+    {"shadowds", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "", 16},
+    {"shadowd32", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "", 17},
+    // Several targets: the output words past the first ones
+    {"mrt1", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "", 18, 1 << 16, MTLPixelFormatRGBA8Unorm},
+    {"mrt2", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "", 18, 2 << 16, MTLPixelFormatRGBA8Unorm},
+    {"mrt3", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "", 18, 3 << 16, MTLPixelFormatRGBA8Unorm},
+    {"mrt4", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "", 18, 4 << 16, MTLPixelFormatRGBA8Unorm},
+    // Targets of 32-bit channels
+    {"rgba32f", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "0.25, 0.5, 0.75, 1.0", 0, 0, MTLPixelFormatRGBA32Float},
+    {"rg32f", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "0.25, 0.5, 0.75, 1.0", 0, 0, MTLPixelFormatRG32Float},
+    // A fragment shader writing depth, and multisampling
+    {"fragdepth", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "", 19, RV_DEPTH},
+    {"msaa4", 64, 64, 3, 1, {0, 0, 0, 1}, NO, "0.25, 0.5, 0.75, 1.0", 0, RV_MSAA},
 };
 
 static NSString *render_source(const RenderVariant *v) {
+    if (v->kind >= 13 && v->kind <= 15) {
+        const BOOL store = v->kind != 15;
+        return [NSString stringWithFormat:
+            @"#include <metal_stdlib>\n"
+             "using namespace metal;\n"
+             "%s tri_vs(uint vid [[vertex_id]], device float4 *o [[buffer(1)]]) {\n"
+             "    float x = float(vid %% 3) * 0.5 - 0.5, y = float(vid) * 0.03 - 0.5;\n"
+             "    %s\n"
+             "    %s\n"
+             "}\n"
+             "fragment float4 tri_fs() { return float4(0.25, 0.5, 0.75, 1.0); }\n",
+            v->kind == 14 ? "vertex void" : "vertex float4",
+            store ? "o[vid] = float4(float(vid), x, y, 1.0);" : "",
+            v->kind == 14 ? "" : "return float4(x, y, 0.0, 1.0);"];
+    }
+    if (v->kind == 18) {
+        const int n = (v->flags >> 16) & 7;
+        NSMutableString *fields = [NSMutableString string], *sets = [NSMutableString string];
+        for (int i = 0; i < n; i++) {
+            [fields appendFormat:@"float4 c%d [[color(%d)]]; ", i, i];
+            [sets appendFormat:@"o.c%d = float4(0.1 * %d, 0.25, 0.5, 1.0); ", i, i + 1];
+        }
+        return [NSString stringWithFormat:
+            @"#include <metal_stdlib>\n"
+             "using namespace metal;\n"
+             "struct O { %@ };\n"
+             "vertex float4 tri_vs(uint vid [[vertex_id]]) {\n"
+             "    float2 p[3] = { float2(-1, -1), float2(3, -1), float2(-1, 3) };\n"
+             "    return float4(p[vid], 0.0, 1.0);\n"
+             "}\n"
+             "fragment O tri_fs() { O o; %@ return o; }\n", fields, sets];
+    }
+    if (v->kind == 19)
+        return @"#include <metal_stdlib>\n"
+                "using namespace metal;\n"
+                "struct O { float4 c [[color(0)]]; float d [[depth(any)]]; };\n"
+                "vertex float4 tri_vs(uint vid [[vertex_id]]) {\n"
+                "    float2 p[3] = { float2(-1, -1), float2(3, -1), float2(-1, 3) };\n"
+                "    return float4(p[vid], 0.0, 1.0);\n"
+                "}\n"
+                "fragment O tri_fs(float4 f [[position]]) {\n"
+                "    O o; o.c = float4(0.25, 0.5, 0.75, 1.0); o.d = f.x / 64.0; return o;\n"
+                "}\n";
+    if (v->kind == 16 || v->kind == 17)
+        return @"#include <metal_stdlib>\n"
+                "using namespace metal;\n"
+                "vertex float4 tri_vs(uint vid [[vertex_id]]) {\n"
+                "    float2 p[3] = { float2(-1, -1), float2(3, -1), float2(-1, 3) };\n"
+                "    return float4(p[vid], 0.0, 1.0);\n"
+                "}\n"
+                "fragment float4 tri_fs(depth2d<float> d [[texture(0)]], sampler s [[sampler(0)]]) {\n"
+                "    return float4(d.sample_compare(s, float2(0.5), 0.5));\n"
+                "}\n";
     if (v->kind == 10)
         return @"#include <metal_stdlib>\n"
                 "using namespace metal;\n"
@@ -538,6 +612,14 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
     pd.fragmentFunction = [lib newFunctionWithName:@"tri_fs"];
     MTLPixelFormat format = v->format ? v->format : MTLPixelFormatBGRA8Unorm;
     pd.colorAttachments[0].pixelFormat = format;
+    for (int i = 1; i < ((v->flags >> 16) & 7); i++)
+        pd.colorAttachments[i].pixelFormat = format;
+    if (v->flags & RV_MSAA)
+        pd.rasterSampleCount = 4;
+    if (v->kind == 14) {
+        pd.fragmentFunction = nil;
+        pd.rasterizationEnabled = NO;
+    }
     if (v->flags & RV_BLEND) {
         pd.colorAttachments[0].blendingEnabled = YES;
         pd.colorAttachments[0].sourceRGBBlendFactor = MTLBlendFactorSourceAlpha;
@@ -597,6 +679,22 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
         rp.colorAttachments[0].clearColor = MTLClearColorMake(v->clear[0], v->clear[1], v->clear[2],
                                                               v->clear[3]);
         rp.colorAttachments[0].storeAction = MTLStoreActionStore;
+        for (int i = 1; i < ((v->flags >> 16) & 7); i++) {
+            rp.colorAttachments[i].texture = [dev newTextureWithDescriptor:td];
+            rp.colorAttachments[i].loadAction = MTLLoadActionClear;
+            rp.colorAttachments[i].storeAction = MTLStoreActionStore;
+        }
+        if (v->flags & RV_MSAA) {
+            MTLTextureDescriptor *ms = [MTLTextureDescriptor
+                texture2DDescriptorWithPixelFormat:format width:v->width height:v->height mipmapped:NO];
+            ms.textureType = MTLTextureType2DMultisample;
+            ms.sampleCount = 4;
+            ms.usage = MTLTextureUsageRenderTarget;
+            ms.storageMode = MTLStorageModePrivate;
+            rp.colorAttachments[0].texture = [dev newTextureWithDescriptor:ms];
+            rp.colorAttachments[0].resolveTexture = tex;
+            rp.colorAttachments[0].storeAction = MTLStoreActionMultisampleResolve;
+        }
         if (v->flags & RV_DEPTH) {
             MTLTextureDescriptor *dd = [MTLTextureDescriptor
                 texture2DDescriptorWithPixelFormat:MTLPixelFormatDepth32Float width:v->width
@@ -766,6 +864,27 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
             [enc setFragmentBuffer:cbuf offset:0 atIndex:0];
             logf_(@"fragment constant buffer gpu 0x%llx", cbuf.gpuAddress);
         }
+        id<MTLBuffer> storebuf = nil;
+        if (v->kind >= 13 && v->kind <= 15) {
+            storebuf = [dev newBufferWithLength:4096 options:MTLResourceStorageModeShared];
+            memset(storebuf.contents, 0xcd, 4096);
+            [enc setVertexBuffer:storebuf offset:0 atIndex:1];
+            logf_(@"store buffer gpu 0x%llx", storebuf.gpuAddress);
+        }
+        if (v->kind == 16 || v->kind == 17) {
+            MTLTextureDescriptor *dd = [MTLTextureDescriptor
+                texture2DDescriptorWithPixelFormat:v->kind == 16 ? MTLPixelFormatDepth32Float_Stencil8
+                                                                 : MTLPixelFormatDepth32Float
+                                             width:64 height:64 mipmapped:NO];
+            dd.storageMode = MTLStorageModePrivate;
+            dd.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
+            MTLSamplerDescriptor *smp = [MTLSamplerDescriptor new];
+            smp.compareFunction = MTLCompareFunctionLess;
+            id<MTLTexture> depth = [dev newTextureWithDescriptor:dd];
+            [enc setFragmentTexture:depth atIndex:0];
+            [enc setFragmentSamplerState:[dev newSamplerStateWithDescriptor:smp] atIndex:0];
+            logf_(@"depth texture gpu resource 0x%llx", depth.gpuResourceID._impl);
+        }
         id<MTLBuffer> ibuf = nil;
         if (v->flags & RV_INDEXED) {
             uint16_t idx[4] = { 0, 1, 2, 0 };
@@ -786,11 +905,14 @@ static void capture_render(NSString *dir, const RenderVariant *v) {
         [cb commit];
         [cb waitUntilCompleted];
         // What iOS actually drew: the hooks are not in yet in this render
-        if (r == 0 && repeat && !(v->flags & RV_LINEAR_TARGET)) {
+        if (r == 0 && repeat && !(v->flags & RV_LINEAR_TARGET) && !v->format) {
             NSMutableData *px = [NSMutableData dataWithLength:4 * v->width * v->height];
             [tex getBytes:px.mutableBytes bytesPerRow:4 * v->width
                fromRegion:MTLRegionMake2D(0, 0, v->width, v->height) mipmapLevel:0];
             [px writeToFile:[dir stringByAppendingPathComponent:@"pixels.raw"] atomically:YES];
+            if (storebuf)
+                [[NSData dataWithBytes:storebuf.contents length:4096]
+                    writeToFile:[dir stringByAppendingPathComponent:@"stored.raw"] atomically:YES];
         }
         if (r < repeat && (r < 4 || r % 25 == 0 || cb.status != MTLCommandBufferStatusCompleted))
             logf_(@"render %d: status %ld, %u traps, %.2f ms", r, (long)cb.status,
