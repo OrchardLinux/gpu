@@ -1119,9 +1119,16 @@ word for word. Two iOS words are unmapped: after the clear values, `01000000` in
 `dsreload*` capture and 0 elsewhere, and before it `0x100` on load passes. They do not explain
 the hang: the `depth` capture stores twiddled with both 0. `0xf48` has no write mask.
 
-Next: a tool below dEQP. Run the iOS `depth` render through `pvr-tri` with only the twiddled
-store added, and read the GPU's fault registers after the hang (the kernel prints only
-stamps). Patches: `tools/a10/out/deqp-results/session-tools/ds-wip*.patch`.
+What the hang looks like (`modprobe powervr exp_hw_support=1 apple_fw_debug=3` prints the
+firmware's trace at a hang): the job starts (event 0x11), then events 0x02, 0x04, 0x03, then only
+what looks like idle ticks (0x12 for ids 1-3, 0x01, 0x00), and "fragment retired" counts it. So
+the firmware seems idle and the hardware's completion never arrives. No baseline trace yet:
+the kernel prints it only at a hang. `0x20100e150` (MMU fault, read with `/dev/mem`) read 0 during
+and after the hang, **but so did `0xe148`, which should be non-zero, so these reads may
+mean the GPU was powered down, not that there was no fault.** Validate the read on a running job
+first. PR #6 (A9) has the same words and no note of this hang.
+
+Patches: `tools/a10/out/deqp-results/session-tools/ds-wip*.patch`.
 
 `ZINK_DEBUG=rp` avoids needing reload in most applications.
 
