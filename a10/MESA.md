@@ -980,7 +980,7 @@ Sampler word: min LOD bits 0-9, max LOD bits 10-19 (1/64 units, at most 896),
 mag linear 23, min linear 25, mip nearest 27, mip linear 28, address modes at
 29, 32, 35 (0 clamp, 1 repeat, 2 mirror, 3 border), high half `0x00c00780`.
 
-Open: cube faces show seam strips.
+Cube faces: see "Non-seamless cube maps".
 
 ### Depth and stencil (A10)
 
@@ -1043,26 +1043,42 @@ level z layer pitches on, a layer holding the whole 2D chain when the image has 
 It is not 3D Morton order. Layout 5, slice count in the layers' field (bit 111), `fb1a`
 samples. Before this the GPU hung repeatedly, enough to take the tablet down.
 
-### Results on 2026-11-06 (Mesa `c2788cc428a`)
+### Results on 2026-11-06 (Mesa `441384c3f10`)
 
-`gles2-main`: 17,071 of 17,165 OK (16,906 pass, 112 not supported, 53 quality
-warnings), 93 fail, 1 hang (`uniform_api.random.80`, passes alone). `gles2-khr-main`:
-468 of 473 OK. A full run takes about 6 minutes: `full-7.csv`, `khr-2.csv` in
-`tools/a10/out/deqp-results/`.
+`gles2-main`: 17,137 of 17,165 OK (16,972 pass, 112 not supported, 53 quality warnings),
+27 fail, 1 hang. `gles2-khr-main`: 468 of 473. Files `full-10.csv`, `khr-3.csv`. The next
+commit (`734c638246f`) also passes `tmp_array` (3), in a partial run, so 25 should remain.
 
-Open, by size:
+Open:
 
-- **Vertex cube samples** (about 60): results depend on the vertex instance count, so
-  some vertices are wrong. Tried: the direction in r0-r2 with Apple's `1199 01..` form
-  and float add, result over coordinates, indices kept elsewhere. iOS draws it correctly
-  (capture `vscube-r1`), whose state has not been compared yet.
-- **Depth/stencil reload** (about 28, plus 4 KHR `internalformat` that sample depth): see
-  below.
-- **Small:** `gl_PointCoord`, `clip_control` (2), cube `linear_*` mipmaps (6: mixed
-  colours at face edges), `tmp_array` out of registers (3), `all_features.fragment` (2:
-  vec4 NIR registers), `uniform_api.random` (2), KHR `texture_3d...negative` (crash).
+- **Depth/stencil reload:** 21 `fbo.render` tests, below. Probably also `clip_control` (2,
+  its second image compares depth) and KHR `internalformat` (4), which sample depth; those
+  are not confirmed to share the cause.
+- **`uniform_api.random.79`** (black output, 38 KB shaders) and **`.80`** (correct image, but
+  the fragment job never stamps, one GPU reset, later tests still pass). Not understood.
+- **KHR `texture_3d.filtering.combinations.negative`:** wrong error code.
 
-### Depth/stencil reload: the iOS recipe, not yet working
+### Non-seamless cube maps (for any G9P board)
+
+GLES 2 samplers ask for `VK_SAMPLER_CREATE_NON_SEAMLESS_CUBE_MAP_BIT_EXT`, but this hardware
+filters across faces: scanning the unused bits of the sampler word changed nothing. Rogue's
+`cemedge_dontfilter` may be global (`CR_TPU`); not tried. Zink's own emulation is not
+usable: its LOD query loses the direction's z, and a new program with unchanged sampler
+state keeps the unlowered shader. Instead the driver keeps the extension and:
+
+- compiles pipelines with cube samples up to three times: normal, sampling a 2D array per
+  face (`g9p_lower_cubes_seamful()`), and that with GL's magnification threshold;
+- picks one per draw from the bound samplers (bit 63 of the sampler word, ignored by the
+  hardware, marks the flag) and rewrites the cube's texture state to layout 3, 6 layers;
+- samples with exact gradients from the direction's derivatives, each pixel using its own
+  face: implicit LOD on face coordinates is wrong on seams, because helper pixels past an
+  edge jump to another face. The hardware's LOD query with an array state is wrong on the
+  top row, and a second texture state at dword +4 does not work;
+- GL's threshold: magnification at LOD <= 0.5 when mag is linear and min a nearest mipmap;
+  the hardware's is 0. Only explicit levels show it, so vertex shaders only. Zink's maximum
+  LOD of 0.25 means no mipmaps and must not get it.
+
+### Depth/stencil reload: still not working
 
 iOS words (captures `dsreload*-r1`, each reload verified by its pixels):
 
@@ -1074,22 +1090,36 @@ iOS words (captures `dsreload*-r1`, each reload verified by its pixels):
 | S8 | `00062004` | `00026002` |
 
 From these and PR #6's `pvr_g5p_ds.c`: load and store twiddled (bits 13, 17) with the
-extents in ZLSCTL left 0; `ISP_ZLS_PIXELS` (`(w-1) | (h-1) << 15`, our 0xfd8 word) sizes
-the surface, aligned to 32 with a stencil plane or a side under 32; each plane is Morton
-order over a power-of-two square of 32-pixel tiles; stencil follows depth at a 16 KiB
-boundary.
+extents in ZLSCTL left 0; `ISP_ZLS_PIXELS` (`(w-1) | (h-1) << 15`, our 0xfd8 word) sizes the
+surface, aligned to 32 with a stencil plane or a side under 32; each plane is Morton order
+over a power-of-two square of 32-pixel tiles; stencil follows depth at a 16 KiB boundary.
+Firmware record: depth base at the first two of four slots 0x28 bytes apart, stencil | 1 at
+the last two (load slot empty when that aspect is not used).
 
-Known bug: `g9p_frag_stream()` sets `ISP_ZLS_PIXELS` only with a depth attachment, so an
-S8 attachment stores nothing (its memory stays zero). The first attempt at the whole
-recipe hung a fragment job and wedged the GPU, so the variants tried after it are
-**invalid**, not failures. Patch: `tools/a10/out/deqp-results/session-tools/ds-wip.patch`.
+Tested on fresh boots, unless noted:
 
-Next: apply one change per boot at most until it is safe, the `ZLS_PIXELS` fix first and
-twiddled store last.
+| Change | Result |
+|---|---|
+| `ISP_ZLS_PIXELS` for stencil-only attachments | Committed. Safe, no pass on its own |
+| Extents 0 in ZLSCTL, linear | Safe, reload still fails |
+| Twiddled store and load | **Hangs the first fragment job** |
+| ... with a 64x64 surface, as iOS | Hangs |
+| ... storing both planes, as iOS | Hangs |
+| ... without empty-tile processing | Hangs |
+| iOS memory layout (`ds-wip2.patch`), no twiddling | Hung on one boot, on the same test with the layout switched off, which the clean driver passes. **Unexplained, retest** |
 
-**After any GPU hang, stop and reboot.** A wedged GPU fails every later test, including
-known good drivers, and looks like the experiment failed. Check `dmesg` for "resetting"
-after each test. Passing tests can hide it.
+The wrong pixels of the linear reload form a 32-pixel tile pattern. Our words match iOS's
+at ZLSCTL, `ISP_ZLS_PIXELS` and the bases, so the cause is elsewhere in the render record.
+Not yet compared word for word: the record differs between iOS and our kernel. One unknown:
+a word after the iOS clear values is `01000000` in `dsreload*`, 0 in `depth`, and the word
+before it is `0x100` on load passes. Next: map those to firmware registers (Start3D's table
+in RENDER.md), and write them. Patches: `tools/a10/out/deqp-results/session-tools/ds-wip*.patch`.
+
+`ZINK_DEBUG=rp` avoids needing reload in most applications.
+
+**After any GPU hang, stop and reboot.** A hang in the depth/stencil path wedges the GPU; a
+driver reload (`rmmod`, `modprobe`) does not recover it, and known good drivers then fail.
+The `uniform_api.random.80` reset does not wedge it. Check `dmesg` for "resetting" per test.
 
 ## Roadmap (2026-11-03)
 

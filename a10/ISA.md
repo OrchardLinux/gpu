@@ -313,6 +313,20 @@ named `*.mtlp-json`.
 - **Open:** cube samples in vertex shaders give results that depend on the
   vertex instance count, so some vertices are wrong.
 
+## Derivatives, gradients, cube direction (metal-tt, 2026-11-06, TESTED with dEQP)
+
+| Encoding | Meaning |
+|---|---|
+| `0198 dst 0100\|r<<2 0144 0200` | `dfdx`; r up to r31 |
+| `0198 dst 0100\|r<<2 0145 0400` | `dfdy` |
+| `f71a W1 8100\|coord<<9\|sampler 07e0 0080` | 2D array sample with gradients: f32 dx.s, dx.t, dy.s, dy.t in r0-r3; s, t, layer (uint) from `coord`. 2D: `f51a` |
+| `2198 0100\|2d 0100\|r<<2 0154 0038` | Plain move. A vertex shader's cube direction into r2, r1, r0 **must** use this: a float add into r0-r2 gave half of the lanes wrong coordinates |
+| `271a dst 8100\|coord<<9\|sampler 0600` | LOD query, array (`2d1b ... 0700 0200` on a cube), f32 in dst. Wrong on face edges with an array texture state |
+
+A vertex shader's 2D array sample is `f71a`, W2 bit 15 set, as a cube's.
+`gl_PointCoord` is a varying whose DOUTI has the pointsprite bit (bit 23 of its first data
+word). Sample state must sit at its own 8-dword slot: a second state at dword +4 fails.
+
 ## Fragment register bank (`probes/fsops.metal`, `fsbranch.metal`, 2026-10-31, TESTED)
 
 Fragment shaders keep their registers in a different bank from compute and
