@@ -1054,7 +1054,8 @@ Open:
 - **Depth/stencil reload:** 21 `fbo.render` tests, below. Probably also `clip_control` (2,
   its second image compares depth) and KHR `internalformat` (4), which sample depth; those
   are not confirmed to share the cause.
-- **`uniform_api.random.79`:** black output, reproducible alone; 38 KB shaders, a struct of
+- **`uniform_api.random.79`:** black output, reproducible alone, and it resets the GPU (the
+  count rose by one after running it alone, so the job hangs); 38 KB shaders, a struct of
   uniforms. The PDS size fields are in range. Not understood.
 - **`uniform_api.random.80`:** hangs only in the suite's batch (job 399 of that process, right
   after `.79`), and passes alone with no reset, so `.79` may be what leaves it broken. That
