@@ -1095,6 +1095,21 @@ renderer at the start and the render node before every batch.
   - `fragdepth`: no record change against `depth`, only the shader. `msaa4` against `base`: R9+0x4d8
     0xf -> 7, +0x600 1 -> 0x101, +0x6a8 1 -> 4, +0x6ac.. the sample positions, end of tile 0x3c060.
   - `shadowds`, `shadowd32`: no format word differs, the depth plane is separate.
+- **Output width solved (from PR #74's kernel, `g5p_ru_fill_3d_width()`):** for width w, count =
+  0x4000 / (w << 10), code = 0 / 0x10 / 0x20 for 2 / 4 / 8. 0xfd8 = count (without depth), 0x4070 =
+  code >> 4 | 0xf8, each core's 0x11080 word = code | (count - 1) << 7 | 0x43. The old constants were
+  width 4. The end of tile emit is `151c` for 32-bit channels and `051c` otherwise; with both, the
+  table's keys work and all fragment_out array and RGBA32 tests in the slice pass.
+- **Transform feedback: the fault is in our program.** Apple's exact `store` program, injected on
+  Linux with only the address slot adapted, captures every vertex, with 4-byte stores too, and at
+  every register count from 1 to 30. So task state, firmware and kernel are right. Our program still
+  stores wrong data after the first vertex, also with: addresses ahead of the outputs, no duplicate
+  stores, no offset mask, four outputs, no instance term, one DOUTW. `024d` with `8000` hangs. Apple's
+  compiler fetches buffer reads by PDS, not USC loads, so a next test is captured data that never
+  came from a USC load. Stored loaded registers gave values that changed per run, but that test read
+  the capture buffer and is not conclusive. Patch of the experiments: session-tools/xfb-wip.patch.
+  PR #74's notes (`brkosebay/a9-gpu` docs/gpu/experiments/xfb.md): above 12 temps a VS wedges the A9's
+  TA; nothing rewrites a store's registers without a `csync`.
 - D32F_S8 is two planes in one allocation, sampled as R32F; level 0 passes. Other levels and layers
   still fail, though their uploads look right. Stencil of such images is dropped.
 - Open, by size in the sample: transform feedback data (25), fragment_out (11: three or more targets,
