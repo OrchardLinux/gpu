@@ -1042,6 +1042,26 @@ level z layer pitches on, a layer holding the whole 2D chain when the image has 
 It is not 3D Morton order. Layout 5, slice count in the layers' field (bit 111), `fb1a`
 samples. Before this the GPU hung repeatedly, enough to take the tablet down.
 
+### ES 3 status (2026-11-07, Mesa `g9p-gles2`)
+
+Measured on the GPU with a 1-in-40 sample of `gles3-main` (1,120 tests): about 87.5% OK before the
+last fixes below. `es3-1.csv` is void from row 14,247: the device rebooted mid-run, the GPU module
+was not loaded, and EGL surfaceless silently fell back to llvmpipe. `deqp-run.py` now checks the
+renderer at the start and the render node before every batch.
+
+- Fixed: unaligned vertex bindings copied at submission, CPU blit centres and linear filtering, flat
+  varyings (`2314` loads, a DOUTI program per provoking vertex, no W iterate without perspective),
+  centroid, the format table (PR #6's A9 keys), output words per format, 64-byte linear rows,
+  primitive restart, elements of UBO arrays, several render targets up to four output words.
+- **The PBE takes the tile in 16-bit halves.** A 32-bit code converts (0x121 packs an f32 to f16,
+  0x221 widens an f16). R32 stores through 0x123, RG32 through 0x132. RGBA32 has no such key: open.
+- **Six or more output words fail** (three RGBA8 targets). The A9 passes a pixel output width at
+  record +0x6dc; not found on the A10 yet. Values tried in 0x6d0 and 0x3e00 did not help.
+- An output register read right after an ALU write gives 0 in the first task of each tile: write it
+  once, last.
+- Open, by size in the sample: transform feedback (`pvr_xfb` asserts; PR #6 has `pvr_g5p_xfb.h`),
+  shadow textures (depth sampling), derivatives on float targets, texture functions.
+
 ### Results on 2026-11-07 (Mesa `c44de203bcc`)
 
 `gles2-main`: 17,154 of 17,165 OK (16,989 pass, 112 not supported, 53 quality warnings), 10 fail,

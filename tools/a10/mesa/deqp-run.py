@@ -9,7 +9,9 @@
 Results live on the Mac, written and flushed per test, because a wedged GPU or
 a panic takes the device's RAM with it. A test that crashes or stops producing
 output is recorded and never run again, so a rerun after a reboot continues
-behind it. After a hang the GPU is probed (--health); if it does not answer the
+behind it. A run checks the renderer at its start and the render node before every batch,
+and stops with status 3 without them: Mesa would silently fall back to
+software rendering, and the results would not be the GPU's. After a hang the GPU is probed (--health); if it does not answer the
 run stops with exit status 3 and says a reboot is needed.
 
 Exit status: 0 suite finished, 2 usage or setup problem, 3 reboot needed.
@@ -59,6 +61,11 @@ DEQP_ARGS = [
 
 DEVICE_LIST = "/tmp/deqp-batch.txt"
 CASE_RE = re.compile(r"^Test case '([^']+)'\.\.")
+# EGL surfaceless silently falls back to llvmpipe without a render node
+NO_GPU = "deqp-run: no GPU render node"
+GPU_CHECK = f"[ -e /dev/dri/renderD128 ] || {{ echo '{NO_GPU}'; exit 9; }}; "
+RENDERER_CASES = {"gles2": "dEQP-GLES2.info.renderer", "gles3": "dEQP-GLES3.info.renderer",
+                  "gles31": "dEQP-GLES31.info.renderer"}
 # dEQP's status line: two spaces, the status, its description in parentheses
 STATUS_RE = re.compile(
     r"^\s+(Pass|Fail|NotSupported|QualityWarning|CompatibilityWarning|"
@@ -141,7 +148,9 @@ def run_batch(device, args, env, suite, batch, out, deadline_per_test):
         + DEQP_ARGS
         + [f"--deqp-gl-config-name={args.gl_config}", f"--deqp-caselist-file={DEVICE_LIST}"]
     )
-    script = chroot_script(args.device_root, workdir, deqp + " 2>&1", env, args.chroot)
+    script = chroot_script(
+        args.device_root, workdir, ("" if args.software else GPU_CHECK) + deqp + " 2>&1", env, args.chroot
+    )
 
     proc = subprocess.Popen(
         device.argv(script),
@@ -189,13 +198,16 @@ def run_batch(device, args, env, suite, batch, out, deadline_per_test):
                 # The context is gone: every later test of this process would fail
                 if "VK_ERROR_DEVICE_LOST" in text:
                     why = "hang"
-            if why == "hang":
+                # EGL's silent fallback: results from here on would be llvmpipe's
+                if NO_GPU in text:
+                    why = "software"
+            if why in ("hang", "software"):
                 break
         elif time.monotonic() - last_output > deadline_per_test:
             why = "hang"
             break
 
-    if why == "hang":
+    if why in ("hang", "software"):
         try:
             os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
@@ -253,6 +265,22 @@ def cmd_run(args):
         env["MESA_GLES_VERSION_OVERRIDE"] = args.gles_override
 
     device = Device(args.device_cmd)
+    if not args.software and args.suite in RENDERER_CASES:
+        workdir, binary, _ = SUITES[args.suite]
+        qpa = "/tmp/deqp-renderer.qpa"
+        probe = chroot_script(
+            args.device_root,
+            workdir,
+            f"{binary} --deqp-case={RENDERER_CASES[args.suite]} --deqp-surface-type=pbuffer "
+            f"--deqp-surface-width=64 --deqp-surface-height=64 --deqp-log-filename={qpa} "
+            f"--deqp-gl-config-name={args.gl_config} >/dev/null 2>&1; grep -a 'zink\\|llvmpipe' {qpa}",
+            env,
+            args.chroot,
+        )
+        text, _ = device.run(probe, 60)
+        if "llvmpipe" in text or "PowerVR" not in text:
+            print(f"Not rendering on the GPU: {text.strip() or 'no renderer reported'}", flush=True)
+            return 3
     new = not os.path.exists(args.results)
     results = open(args.results, "a", newline="")
     writer = csv.writer(results)
@@ -283,6 +311,16 @@ def cmd_run(args):
         finished, why, current, tail = run_batch(device, args, env, args.suite, batch, out, args.timeout)
         finished_set = set(finished)
         remaining = [c for c in batch if c not in finished_set]
+
+        if why == "software":
+            print(
+                "No GPU render node: Mesa would fall back to software rendering, and the "
+                "results would not be the GPU's. Load the GPU driver "
+                "(modprobe powervr exp_hw_support=1) and rerun the same command.",
+                flush=True,
+            )
+            results.close()
+            return 3
 
         if why == "exit" and not remaining:
             i += len(batch)
