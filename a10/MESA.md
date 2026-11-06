@@ -1081,6 +1081,22 @@ renderer at the start and the render node before every batch.
   still return wrong values, which also fails vertex tests of offsets and gradients. Reason unknown.
 - Vector `dFdx`/`dFdy` and a break ending a loop body (a switch's last case) compile now.
 - 1-in-40 sample at Mesa `0bc9604815d`: 1,022 of 1,109 (92.2%), no regressions.
+- **iOS captures 2026-11-07** (`ios-capture` variants, `out/ios-render/*-r1`):
+  - `store`, `storenr`, `storeref`: iOS stores all 30 vertices exactly, also while drawing. Same VDM
+    state (`0x1081`, MAX_INSTANCES 0) and PDS kick form as ours, stores after outputs, `015e a000`
+    end. Differences: R8 is a resource list; R9+0x1e4 0 -> 0x100 and +0x1e8 0x100 -> 0x10100. One
+    DOUTW instead of two on Linux changes nothing.
+  - `mrt1..4`, `rg32f`, `rgba32f`: **R9+0x6ec is the output width**: 2 for one RGBA8 or RG32F, 4 for
+    two RGBA8 or one RGBA32F, 8 for three or four RGBA8. No kext instruction reads +0x6ec or its
+    record-relative +0x6c4 as this field, so the firmware or a copied block does. Sweeps that
+    change nothing: 0x6d0 (0x00-0x02, 0x1c-0x1f), ISP_CTL low bits. iOS's RGBA32F target key is the
+    table's 0x238 (`fb44470a`), RG32F's 0x231: the conversions noted above may be a symptom.
+    Next: decompile the firmware's Start3D; the A9 kernel has a `pixel_output_width` table.
+  - `fragdepth`: no record change against `depth`, only the shader. `msaa4` against `base`: R9+0x4d8
+    0xf -> 7, +0x600 1 -> 0x101, +0x6a8 1 -> 4, +0x6ac.. the sample positions, end of tile 0x3c060.
+  - `shadowds`, `shadowd32`: no format word differs, the depth plane is separate.
+- D32F_S8 is two planes in one allocation, sampled as R32F; level 0 passes. Other levels and layers
+  still fail, though their uploads look right. Stencil of such images is dropped.
 - Open, by size in the sample: transform feedback data (25), fragment_out (11: three or more targets,
   RGBA32; includes hangs), builtin precision (6), texture functions in vertex shaders (5),
   derivatives on multisampled and RGBA32 targets (5), compressed `texture.wrap` (4), D32F_S8
