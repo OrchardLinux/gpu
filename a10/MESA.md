@@ -960,10 +960,10 @@ tests): see "Results" below. Not tested on the GPU desktop yet: do that before E
 
 ### Zink on this GPU
 
-`ZINK_DEBUG=rp` (render-pass tracking for tilers) is needed: without it Zink
-splits renders, and those depend on the broken depth/stencil reload below. Zink
-turns it on by itself only for certain driver IDs, not for ours. The test runner
-sets it. The desktop session needs it too (not done or tested yet).
+`ZINK_DEBUG=rp` (render-pass tracking for tilers) is used for every result here: without it Zink
+splits renders, and those depend on depth/stencil reload, which is only partly working (below).
+Zink turns it on by itself only for certain driver IDs, not for ours. The test runner sets it.
+The desktop session needs it too (not done or tested yet).
 
 ### Image state and sampler (A9 layout from PR #4, works on the A10)
 
@@ -986,16 +986,15 @@ Cube faces: see "Non-seamless cube maps".
 
 - **Clears:** a depth/stencil clear with no colour needs tag writes on and the
   translucent pass (`0x03cc0000` with stencil, `0x03c40000` without, pass 1).
-- **D16 depth clear value is a float** like the others: as 65535 every LESS failed
-  (the A9 code uses the integer: not tested again since the reload recipe).
+- **D16's depth clear is its integer** (`0000ffff` for 1.0, as on iOS and the A9). An earlier
+  conclusion here that it must be a float was caused by the aliasing bug below.
 - **Depth bias** uses Rogue's table, index and ISPCTL bit, with its D16 scale of 512.
 - **Stencil clear value:** `ISP_BGOBJVALS` does not set stencil on this path, so
   a non-zero stencil clear is drawn with the first draw. Forcing that clear for
-  zero values, or once per dynamic render, made every test fail and hung.
-- **Reload from memory is broken:** the store writes only about 96 of 4096 words.
-  The twiddled store (bit 17) hangs. `loadtwiddled` (bit 13), `fb_loaden`,
-  `fb_storeen`, `mloaden`, `mstoreen` and pixel extents do not help. A real fix
-  probably needs an iOS capture. `ZINK_DEBUG=rp` avoids needing it.
+  zero values, or once per dynamic render, made every test fail and hung. This was
+  measured before the aliasing fix and may need another look.
+- **Store and reload:** see "Depth/stencil reload" below. Parts of this section's history
+  were measured with the aliasing bug described there.
 
 ### Vertex register pressure
 
@@ -1081,17 +1080,16 @@ state keeps the unlowered shader. Instead the driver keeps the extension and:
   the hardware's is 0. Only explicit levels show it, so vertex shaders only. Zink's maximum
   LOD of 0.25 means no mipmaps and must not get it.
 
-### Depth/stencil reload: still not working
+### Depth/stencil reload: works for D16 by a workaround, not finished
 
 **Read this first: an aliasing bug hid every result before 2026-11-07.** `g9p_ds_zls()` packs
 ZLSCTL with `pvr_csb_pack()` through a `uint64_t *`. The pack writes dwords, so under strict
 aliasing the compiler keeps the variable's old value, from `g9p_zlsctl()`. So in commit
 `734c638246f` and everything before it, **the word `g9p_ds_zls()` builds never reaches the
 hardware**: D16 has no format bits, S8 sends 0 and stores nothing, D32F_S8 never stores stencil.
-A printf in the block or a pack into `uint32_t[2]` + `memcpy()` makes it take effect. The fix is
-not committed: the correct words on the linear path hang `depth_stencil_clear.*` and more (48
-regressions, `d16-fix-try1.patch`), because the suite has only ever passed with the wrong word.
-The table of hangs in earlier versions of this section was measured with the bug and is void.
+Fixed in `c44de203bcc` by packing into `uint32_t[2]` and `memcpy()`. **Results here from before that
+commit are void**, including the earlier table of twiddled-store hangs. Anyone packing a 64-bit word
+through `pvr_csb_pack()` into a `uint64_t *` should check for the same thing.
 
 iOS words (captures `dsreload*-r1`, each reload verified by its pixels):
 
@@ -1137,9 +1135,15 @@ fields differing with depth there: `+0x4d0` clear, `+0x4dc` 0x100 on load passes
 `01000000` with depth/stencil, `+0x4e4` `00010000` for D16, `+0x2e8` ZLSCTL, depth and stencil addresses
 at `+0x308`, `+0x330`, `+0x358`, `+0x380`, `+0x5d0`, `+0x5e0`. The kext's handling is unread.
 
-Tools, all in `session-tools/`: `depth-vk` from PR #6 with a stored-map print (source in the
-scratchpad, patch to redo), `pv.sh`, `dv.sh`, `mx.sh`, `zs.sh`, patches `ds-wip*.patch` with
-switches `G9P_T_*`.
+Twiddled, with the real words, 128x128: the iOS D16 and S8 stores do not hang, but in mode 0 write
+almost nothing and in mode 1 only 1024 bytes; the D32F store and the D16 load (`0502a002`) hang the job,
+also with a 4x larger image and with empty tiles processed; the S8 load does not hang and has no effect.
+The firmware trace at such a hang (`apple_fw_debug=3`) shows job start, then idle ticks. Reads of
+`0x20100e150` (MMU fault) gave 0, not conclusive as `0xe148` also read 0. A fast `/dev/mem` loop on
+these registers probably crashed the kernel: set `power/control` to `on` and read a few times only.
+
+Tools: `tools/a10/mesa/zls/` (README there): PR #6's `depth-vk` with stored-data prints, and scripts
+that run one variant per test. The temporary switches (`G9P_T_*`) were local patches, not committed.
 
 **A GPU hang needs no reboot.** Wait for the hung process to end and for
 `/sys/devices/platform/soc/201000000.gpu/power/runtime_status` to read `suspended` (about 1 s
