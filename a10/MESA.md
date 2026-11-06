@@ -1108,6 +1108,7 @@ renderer at the start and the render node before every batch.
   compiler fetches buffer reads by PDS, not USC loads, so a next test is captured data that never
   came from a USC load. Stored loaded registers gave values that changed per run, but that test read
   the capture buffer and is not conclusive. Patch of the experiments: session-tools/xfb-wip.patch.
+  Also not the operand order (`r0` first instead of second, as Apple's dying-operand form).
   PR #74's notes (`brkosebay/a9-gpu` docs/gpu/experiments/xfb.md): above 12 temps a VS wedges the A9's
   TA; nothing rewrites a store's registers without a `csync`.
 - D32F_S8 is two planes in one allocation, sampled as R32F; level 0 passes. Other levels and layers
