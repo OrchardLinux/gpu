@@ -1089,9 +1089,15 @@ Open (all reproduce alone unless noted):
 - Flaky in batches, pass alone: `draw_buffers_indexed.random` (4), single GPU hangs in
   `read_pixels.rowlength.rgba_uint_23` and `multisample.fbo_4_samples.num_samples_polygon`
   (once each in a batch; alone three times clean).
-- Not ours: these and 69 separate-mode transform feedback cases (now NotSupported, GL's
-  separate-component limit is 4) behave the same on the build of the 6 November run, so the
-  tablet's userspace changed since; the earlier passes cannot be reproduced.
+- The 6 November "passes" these were compared with are llvmpipe's: `es3-1.csv` is void from row
+  14,247 (the device rebooted, EGL fell back to software). llvmpipe also explains its passes of
+  8-sample, sRGB R8/RG8, advanced blend and large transform feedback cases.
+- NotSupported on the GPU (2026-11-08) and why: 333 transform feedback cases over Zink's separate
+  components limit (4, the minimum; Zink sets no other), 48 sRGB R8/RG8 (optional extensions),
+  45 multisample ones (8 samples; MSAA of 32-bit float formats; the `ms0` default framebuffer), 12
+  separate depth/stencil, 12 advanced blend. GLES 2: 91 separate depth16 + stencil8 combinations
+  (allowed to be unsupported), 16 `ms0`, 3 debug marker. KHR GLES 2: 30 HDR ASTC, 7 optional
+  extensions. Candidates to add: sRGB R8/RG8, float linear filtering, advanced blend.
 
 ### ES 3 status, morning (2026-11-07, Mesa `g9p-gles2`, history)
 
