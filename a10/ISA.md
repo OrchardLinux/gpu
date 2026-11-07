@@ -307,6 +307,25 @@ named `*.mtlp-json`.
   0x80 flag. Why is not known.
 - **Register iterates before a wait have two words,** `1b08 0200 004d`: W1 without
   its continuation bit and no third word. With `... 0080` helper pixels get no value.
+- **Only a program's first iterate to the sampler** (`1308 0300 8000`) gives helper
+  pixels coordinates. A second one leaves them without, so its level is wrong where a
+  quad leaves the primitive (dEQP samplers.multi_tex_2d). Later samples iterate into
+  r0-r1 (`1308 0200 004d`) and sample from there.
+- **Vertex compare samples** (`sample_compare` at a level, metal-tt): `151a w1 w2 87c5
+  81c4 0108 8010`, W6 bit 15 besides W3 bit 15 and W4's half; random results without
+  it. W0's top nibble is the result write mask (Apple 1, ours f). Apple's offset-only
+  vertex sample also sets W6 bit 15, with the offset in an odd half (`81c5`), but ours
+  breaks with it and works without. Compare plus offset (reference r2, offset r3 low,
+  `81c4`, `4108`, `8010`) matches Apple word for word and still samples wrong texels.
+- **VDM_STATE0 bits 1-2** (Rogue's flatshade_control): the vertex of a strip's triangle
+  with the flat colour, 2 for the last provoking vertex, 1 for fans. Without it odd
+  strip triangles took another vertex's colour; the DOUTI shade-model byte alone is
+  not enough.
+- **SIZEINFO2 bit 14** (Mesa calls it triangle merging off): with it set, ALU results of
+  helper pixels outside the primitive are wrong, so computed coordinates sample wrong
+  levels at the draw's edges (texture.units, derivate.*.texture). With it clear, quads on
+  the shared diagonal of two triangles vary by one LSB between identical draws in rare
+  runs (samplers.multi_cubemap, about 1 in 6). Meaning not settled.
 - **3D samples** are `fb1a` (fragment and vertex), coordinates in three registers.
 - **gl_FrontFacing:** `0198 dst 0131 0110 0154 0038` reads the winding, not the state:
   XOR it with the draw's front face.
@@ -318,7 +337,7 @@ named `*.mtlp-json`.
 | Encoding | Meaning |
 |---|---|
 | `0198 dst 0100\|r<<2 0144 0200` | `dfdx`; r up to r31 |
-| `0198 dst 0100\|r<<2 0145 0400` | `dfdy` |
+| `0198 dst 0100\|r<<2 0144 0400` | `dfdy`. W3 bit 0 (`0145`) on the program's last derivative: helper pixels stop there |
 | `f71a W1 8100\|coord<<9\|sampler 07e0 0080` | 2D array sample with gradients: f32 dx.s, dx.t, dy.s, dy.t in r0-r3; s, t, layer (uint) from `coord`. 2D: `f51a` |
 | `2198 0100\|2d 0100\|r<<2 0154 0038` | Plain move. A vertex shader's cube direction into r2, r1, r0 **must** use this: a float add into r0-r2 gave half of the lanes wrong coordinates |
 | `271a dst 8100\|coord<<9\|sampler 0600` | LOD query, array (`2d1b ... 0700 0200` on a cube), f32 in dst. Wrong on face edges with an array texture state |

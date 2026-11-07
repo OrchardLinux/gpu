@@ -1042,7 +1042,56 @@ level z layer pitches on, a layer holding the whole 2D chain when the image has 
 It is not 3D Morton order. Layout 5, slice count in the layers' field (bit 111), `fb1a`
 samples. Before this the GPU hung repeatedly, enough to take the tablet down.
 
-### ES 3 status (2026-11-07, Mesa `g9p-gles2`)
+### ES 3 status, evening (2026-11-07, Mesa `5a7204430d1`)
+
+**Full `gles3-main` run on Mesa `c1fa4a43021`: 44,259 of 44,286 OK (99.94%)**: 44,247 pass,
+7 quality and 5 compatibility warnings, 482 not supported, 22 fail, 5 crash
+(`out/deqp-results/es3-2.csv`, about two hours). Two later commits fix 7 of those failures
+(3D projected mipmaps, flat-shaded strips). Method: targeted runs and 1-in-40 slices
+(`t[k::40]` of the non-NotSupported cases of the last full run) until they find nothing,
+then a full run.
+
+Fixed today (details in ISA.md, the commit messages carry the evidence):
+
+- Occlusion queries; depth/stencil stores as iOS does them; D32F_S8's stencil plane after the
+  whole depth chain; RGB565 targets; single-aspect blits.
+- 4x multisampling, sample coverage, alpha to coverage, multisampled texel fetch, sample mask
+  from the draw; punch-through when a pipeline that drops samples reads the tile.
+- Per-target blending and masks, tile reads per channel, targets past what a pixel holds
+  (Apple's fragment store with its guard compare).
+- Derivatives keep helper pixels, breaks under ifs, explicit gradients as explicit levels, 3D
+  offsets, sixteen textures (one table DMA), half-float attributes, packing built-ins.
+- Varyings: a gap slot between varyings with and without W; 30 vec4 varyings, reporting 120
+  components, which Zink 26.2 turns into 15 GL varyings (the minimum; no wait for Zink 26.3).
+- Only a program's first sample iterates straight to the sampler; later ones go through r0-r1
+  (a second straight iterate leaves helper pixels without coordinates).
+- Triangle merging (SIZEINFO2 bit 14) off for samples of plain varyings, through registers too.
+- Vertex compare samples set W6 bit 15 (were random).
+- VDM_STATE0's flat-shade vertex for strips and fans.
+
+Open (all reproduce alone unless noted):
+
+- **Vertex shadow lookups with an offset (7):** our words match Apple's compiler and still
+  sample wrong texels. Moving the offset into the coordinate is wrong for mipmapped textures.
+- **`samplers.multi_cubemap.*` (3-4, flaky, about 1 in 6):** identical draws differ by one LSB
+  on a few pixels of the quad's diagonal. Merging off would fix it but breaks computed
+  coordinates: with bit 14 set, helper pixels outside the primitive get wrong ALU results
+  (`texture.units`, `derivate.*.texture`). Meaning of the bit not settled.
+- **`fbo.multiview.*` (3, crash):** `load_view_index` is not implemented, and multiview
+  (required by Vulkan 1.2, which we report) has no per-view render on G9P yet. Upstream's
+  per-view submission (`pvr_process_graphics_cmd_for_view`) is there to build on.
+- **`transform_feedback.random*.separate.triangles.8` (2, crash):** the vertex shader runs out of
+  registers; outputs kept for the capture stores at the end are pinned and cannot go above r31.
+- **`texstorage3d.size.2d_array_1x1x1_1_levels` (1):** a one-layer, one-level 2D image is
+  linear (the desktop upload optimisation in `pvr_image.c`) and the hardware samples no linear
+  arrays (the linear pitch field is the array's layer field).
+- Flaky in batches, pass alone: `draw_buffers_indexed.random` (4), one `read_pixels.rowlength`
+  hang.
+- Not ours: these and 69 separate-mode transform feedback cases (now NotSupported, GL's
+  separate-component limit is 4) behave the same on the build of the 6 November run, so the
+  tablet's userspace changed since; the earlier passes cannot be reproduced.
+
+### ES 3 status, morning (2026-11-07, Mesa `g9p-gles2`, history)
 
 Measured on the GPU with a 1-in-40 sample of `gles3-main` (1,120 tests): about 87.5% OK before the
 last fixes below. `es3-1.csv` is void from row 14,247: the device rebooted mid-run, the GPU module
