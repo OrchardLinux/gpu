@@ -317,6 +317,9 @@ named `*.mtlp-json`.
   vertex sample also sets W6 bit 15, with the offset in an odd half (`81c5`), but ours
   breaks with it and works without. Compare plus offset (reference r2, offset r3 low,
   `81c4`, `4108`, `8010`) matches Apple word for word and still samples wrong texels.
+- **Vertex kick data stays at four dwords:** VDM_STATE5's `vs_pds_data_size` 2 (eight dwords,
+  for a third DOUTW of a constant into r2) hung the geometry job, with that kick and with the
+  plain one alike. Per-view constants go into per-view programs instead (multiview).
 - **VDM_STATE0 bits 1-2** (Rogue's flatshade_control): the vertex of a strip's triangle
   with the flat colour, 2 for the last provoking vertex, 1 for fans. Without it odd
   strip triangles took another vertex's colour; the DOUTI shade-model byte alone is

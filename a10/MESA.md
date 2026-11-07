@@ -1068,6 +1068,15 @@ Fixed today (details in ISA.md, the commit messages carry the evidence):
 - Triangle merging (SIZEINFO2 bit 14) off for samples of plain varyings, through registers too.
 - Vertex compare samples set W6 bit 15 (were random).
 - VDM_STATE0's flat-shade vertex for strips and fans.
+- Later the same night (Mesa `be8219fcd76`): forty buffer slots (16 vertex bindings plus
+  separate transform feedback buffers overflowed 36; the vertex shader failed to compile and
+  Zink crashed), 2D array samples of linear images (a one-layer, one-level image is linear;
+  the shader takes a 2D sample when the state's layout is 2), and **multiview**: one job per
+  view storing to and loading from its layer, the vertex shader compiled per view with the
+  view index as a constant, the control stream copied per view with each draw's kick words
+  naming that view's kick. All `fbo.multiview` tests pass. A small GL probe that renders into
+  array layers through `GL_OVR_multiview` separated the cases quickly
+  (`session-tools`-style, built in the alarm container with Mesa's headers, libEGL by dlopen).
 
 Open (all reproduce alone unless noted):
 
@@ -1077,16 +1086,9 @@ Open (all reproduce alone unless noted):
   on a few pixels of the quad's diagonal. Merging off would fix it but breaks computed
   coordinates: with bit 14 set, helper pixels outside the primitive get wrong ALU results
   (`texture.units`, `derivate.*.texture`). Meaning of the bit not settled.
-- **`fbo.multiview.*` (3, crash):** `load_view_index` is not implemented, and multiview
-  (required by Vulkan 1.2, which we report) has no per-view render on G9P yet. Upstream's
-  per-view submission (`pvr_process_graphics_cmd_for_view`) is there to build on.
-- **`transform_feedback.random*.separate.triangles.8` (2, crash):** the vertex shader runs out of
-  registers; outputs kept for the capture stores at the end are pinned and cannot go above r31.
-- **`texstorage3d.size.2d_array_1x1x1_1_levels` (1):** a one-layer, one-level 2D image is
-  linear (the desktop upload optimisation in `pvr_image.c`) and the hardware samples no linear
-  arrays (the linear pitch field is the array's layer field).
-- Flaky in batches, pass alone: `draw_buffers_indexed.random` (4), one `read_pixels.rowlength`
-  hang.
+- Flaky in batches, pass alone: `draw_buffers_indexed.random` (4), single GPU hangs in
+  `read_pixels.rowlength.rgba_uint_23` and `multisample.fbo_4_samples.num_samples_polygon`
+  (once each in a batch; alone three times clean).
 - Not ours: these and 69 separate-mode transform feedback cases (now NotSupported, GL's
   separate-component limit is 4) behave the same on the build of the 6 November run, so the
   tablet's userspace changed since; the earlier passes cannot be reproduced.
