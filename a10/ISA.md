@@ -307,6 +307,15 @@ named `*.mtlp-json`.
   0x80 flag. Why is not known.
 - **Register iterates before a wait have two words,** `1b08 0200 004d`: W1 without
   its continuation bit and no third word. With `... 0080` helper pixels get no value.
+- **W3 bit 8 of a fragment sample lets helper pixels go** (Apple's code: `0600` on every
+  sample but the program's last, `0700` on the last; two cube or 2D samples of one
+  coordinate, metal-tt). With it on every sample, a second sample takes its level from
+  pixels already gone: random one-LSB differences where a quad leaves the primitive
+  (dEQP samplers.multi_cubemap). A sample before the last is the pair W3 `0600`, W4 `044d`
+  (Apple's); W3 `0600` with W4 `0200` hung or broke the samples after it. Mesa writes the
+  pair on every sample but the last, except where W4 names an extra operand; the last keeps
+  `0700`, also before a derivative (cleared there, derivatives of samples failed and hung).
+  Apple's second sample of the same straight iterate also sets W2 bit 15; not used yet.
 - **Only a program's first iterate to the sampler** (`1308 0300 8000`) gives helper
   pixels coordinates. A second one leaves them without, so its level is wrong where a
   quad leaves the primitive (dEQP samplers.multi_tex_2d). Later samples iterate into
