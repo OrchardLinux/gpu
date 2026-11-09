@@ -1284,7 +1284,7 @@ idle powers the domain off), then known-good tests pass (measured 2026-11-06). A
 earlier overlaps with the hung process's next timeout and looks like a wedged GPU, which is why
 earlier notes said to reboot. Count `resetting the GPU` per test.
 
-## Firefox and WebGL speed (2026-11-08/09, Mesa fork `g9p-perf-wip`)
+## Firefox and WebGL speed (2026-11-08/09, Mesa fork main `91afab1780e`)
 
 Goal: WebGL in Firefox (Zink on the G9P driver) at 60 fps on the J71b; the
 yardstick was webglsamples.org. Measured with a fresh session per run, frames
@@ -1295,12 +1295,12 @@ regressions):
 
 | Change | Effect |
 |---|---|
-| No CPU wait for the previous submission, and none for vertex-buffer realigns unless the GPU can write the source (`4771844b2bd` → rebased `463a0af8dc4`) | aquarium 42 → 50 fps |
+| No CPU wait for the previous submission, and none for vertex-buffer realigns unless the GPU can write the source (`fd62672ceef`) | aquarium 42 → 50 fps |
 | Vertex outputs written as they come, stores right after their values (not with transform feedback) | aquarium geometry 5.0 → 3.0 ms/frame; fish shader 28 → 16 registers |
 | Both attribute-load orders compiled, the one with fewer registers kept | more vertices per batch on some shaders |
 | Blends from a table of Apple's compiler output (`tools/isa/explore-blend.py`): source-over, SrcAlpha/OneMinusSrcAlpha, One/One, SrcAlpha/One; RGB-only write masks (Zink's for canvases without alpha) keep the tile's alpha with an AND and a half add | electricflower 14 → 60, video 14 → ~50, city 24 → 45, spacerocks 29 → 47, fishtank 24 → 33, toon-shading 53 → 60 |
 
-Kernel (OrchardLinux/linux branch `gpu/a10-perf`): render waits poll in 20 us
+Kernel (orchard `kernel/patches/drivers/gpu/0004-0009`, orchard `711ec3e`): render waits poll in 20 us
 steps instead of 1 ms (field 33 → 36 fps); submissions armed together; VM lock
 killable; firmware stopped when probe fails; `pvr_job_create` trace guarded
 (enabling `events/pvr` oopsed the tablet); `pvr_page_destroy()` survives an
@@ -1319,8 +1319,8 @@ strictly in turn, one scene at a time, with a firmware round trip between
 jobs; pages with about ten passes a frame (field, dynamic-cubemap) lose
 several ms per frame, and Firefox itself copies each frame three times
 (canvas copy, page composite, Labwc composite, about 7.6 ms on the aquarium).
-Overlapping scenes (RENDER.md "Scenes in flight", kernel `apple_overlap`,
-off) crashes the firmware in both attempts so far; parked.
+Overlapping scenes (RENDER.md "Scenes in flight") crashed the firmware in
+both attempts; parked, the code only in a local development tree.
 
 **Found and open**:
 
@@ -1336,8 +1336,8 @@ off) crashes the firmware in both attempts so far; parked.
 `G9P_SERIAL_SUBMITS`, `G9P_REALIGN_WAIT`, `G9P_LATE_OUTPUTS`,
 `G9P_NO_NATIVE_ADD`, `G9P_NO_NATIVE_MASK`, `G9P_FREE_LIST_MB`, `G9P_MOVE_INPUTS`,
 `G9P_VS_REGLOG`, `G9P_PRESSURE`; `G9P_PASSLOG` also reports blends left to the
-shader. The six `WIP` commits at the bottom of `g9p-perf-wip` hold more
-(`G9P_TIME`, `G9P_CAPTURE`, ...) and need splitting before main.
+shader. `eb839e973e3` ("Firefox and WebGL on the A10") holds more
+(`G9P_TIME`, `G9P_CAPTURE`, ...).
 
 ## Roadmap (2026-11-03)
 

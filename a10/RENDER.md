@@ -1127,7 +1127,8 @@ So scenes do not wait for each other because of the parameter manager: the
 kext keeps up to 36 in flight on one persistent free list. Our kernel's
 serialization (rule 2 in bringup/kernel.md) comes from its one slot and from
 rewriting the free-list descriptor as a full stack for every geometry job.
-The first overlap attempt (kernel `e3e4c6663e84`: two slots, two free-list
-ids) crashed the firmware: free list 1 was never registered. Next: rotating
-slots with one free list, the descriptor written once and left to the
-firmware (which writes the hardware stack back into it, fw 0x130cc).
+The first overlap attempt (two slots, two free-list ids) crashed the
+firmware: free list 1 was never registered. The second attempt
+(2026-11-09: eight rotating slots, one free list, the descriptor rebuilt only
+with no scene in flight) also crashed the firmware once two scenes were in
+flight. Parked; the code is kept only in a local development tree.
