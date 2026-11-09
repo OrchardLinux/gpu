@@ -1093,3 +1093,41 @@ bottom}` (`00080030` for 8..48); **blending** marks ISPA/BA pass type 1
 (translucent) and is done by the fragment shader: `211c 2800` reads the
 tile's colour into r0-r1 as halves, then f16 multiply-adds (operand form
 of the half sources still to decode).
+
+## Scenes in flight: the iOS 10 kext's parameter management (2026-11-09)
+
+Static reading of the unstripped iOS 10 T8010 `AGX.kext`
+(userlandkernel/ios-unstripped-kexts, `kexts/10.0/T8010/AGX.kext/AGX`; Ghidra
+headless decompile, symbols intact). On G9 the kext already sends SKU
+streams (`AGXTAChannelG9::encodeTACommandSKUStream`), as iPadOS 17 does, so
+its parameter-manager model is the one our firmware expects. Not yet tried
+on hardware.
+
+- **36 parameter-manager slots.** `AGXParameterManagement::init` allocates
+  one buffer of 0x1b80 bytes: a 0x80-byte header (`PM + 0x190`, GPU address)
+  and 36 slots of 0xc0 bytes; it keeps each slot's GPU address at
+  `PM + 0x1a8 + 8i` and CPU address at `PM + 0x68 + 8i`. Our layout has one
+  slot (0x100 bytes, header at +0xc0).
+- **A new slot for every scene, round robin.**
+  `AGXCommandQueue::processSegmentKernelCommand` (and
+  `AGXGLContext::processSidebandToken`) does, per render command,
+  `PM->index = (PM->index + 1) % 36`, `checkUsageStatistics()`, then the
+  parameter manager's `prepare()`.
+- **Both commands name the scene's slot and the shared header.**
+  `AGXTACommandDescriptor::loadParameterManagementData` and the 3D one copy
+  the header address (`PM + 0x190`), the slot's GPU address
+  (`PM + 0x1a8 + 8*index`) and the slot's macrotile array, macrotile list and
+  VHEAP table (slot +0xa8, +0xa0, +0xb0: our slot fields). The geometry
+  descriptor also takes four parameter-buffer counters (`PM + 0xc50..0xc5c`)
+  and clears them.
+- **One parameter buffer and free list for all scenes**, kept and grown
+  (`prepare()`, page list entries), never rebuilt per scene.
+
+So scenes do not wait for each other because of the parameter manager: the
+kext keeps up to 36 in flight on one persistent free list. Our kernel's
+serialization (rule 2 in bringup/kernel.md) comes from its one slot and from
+rewriting the free-list descriptor as a full stack for every geometry job.
+The first overlap attempt (kernel `e3e4c6663e84`: two slots, two free-list
+ids) crashed the firmware: free list 1 was never registered. Next: rotating
+slots with one free list, the descriptor written once and left to the
+firmware (which writes the hardware stack back into it, fw 0x130cc).
