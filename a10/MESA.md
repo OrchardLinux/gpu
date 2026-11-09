@@ -1376,6 +1376,26 @@ dynamic-cubemap 40, electricflower 56, no hangs; dEQP-GLES3 vertex_arrays,
 instanced, draw, transform_feedback: 2360 pass, 333 not supported. Why odd
 counts stall is not known.
 
+**Multisampled draws run per sample, as on iPadOS (2026-11-10).** fishtank's
+4x render (6 draws) takes 15.1 ms of fragment time, 3.85 ms with
+`webgl.msaa-samples=0`: the fragment program runs once per sample, because
+every 4x kick sets the DOUTU sample rate to 2 (`g9p_kick_4x()`), as the
+contributor's iOS captures do (msaa4, even for a constant-colour shader).
+Rate 0 (once per pixel) on the draws only, on a local experiment: fishtank
+29.6 -> 43.1 fps with timing on, and the page counter 37 -> 59. But
+dEQP-GLES3 `multisample.fbo_4_samples.common_edge_*` and
+`sample_coverage_invert` fail: at rate 0 the output reaches every sample of
+the pixel, regardless of coverage. Rate 1 fails the same way, and so does the user
+pass (7 or 15). Writing the rasterizer's coverage as the program's mask
+(metal-tt: `[[sample_mask]]` input is `8104 dst` and a wait, then `6104`
+writes it) does not fix it either: on the A10 blending is the program's own
+tile read (`fbfetch`), and a program run once per pixel reads one sample's
+destination for all of them. All of fishtank's 4x pipelines blend. Apple's
+compiler emits the same code at 1x and 4x, so the rate is the driver's choice,
+and iPadOS chooses per sample. The 4x cost of WebGL's antialiasing is the
+hardware's; pixel rate could only apply to pipelines that neither blend nor
+read the tile, and none of the measured pages has such a 4x draw.
+
 **Open:** dEQP-GLES3 `fbo.multiview.samples_{1,2,4}` fail on current main and
 on `91afab1780e` (passed after `be8219fcd76`); the tablet's userspace (system
 Zink) changed since.
