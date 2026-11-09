@@ -1199,6 +1199,42 @@ without a hang with the drain, one firmware crash in a dynamic-cubemap run.
 Two jobs per engine run cleanly with the watermark but bring nothing on these
 pages: Firefox submits its next pass only after the previous one completes.
 
+### The free-list counter (2026-11-10)
+
+The contributor's review of the IDs (archive `REVIEW-FREE-LIST-IDS-AND-COUNTERS.md`):
+the firmware scans 127 registrations (IDs 0-126); the ID must agree in four
+places: geometry command +0x18, descriptor +0x08, StartTA word 11
+(opcode-relative +0x2c) and Start3D word 13 (+0x34). Registration writes
+descriptor +0x04 and the table entry, retirement compares, and Finalize3D
+increments the counter word 5 addresses (fw 0xbdcc). Our Finalize3D word 5
+pointed at per-job scratch, descriptor +0x50 elsewhere. Tested on the tablet
+(dev tree, `apple_fl_alias`; runs and notes in the archive, `run-flalias-*`,
+`run-flbatch*`):
+
+| Variant | Result |
+|---|---|
+| one counter block (heap 0x76100) for +0x50 and Finalize3D word 5; host raises +0x00 per submitted scene | firmware crash at fragment job 17 with overlap (null table entry, fw 0x16638); fine without overlap |
+| the same counter, closed batches of 2: drain, reset with +0x00 = 2, no host write between the two scenes | 69,000 scenes, no hang or crash |
+| closed batches of 2 without the shared counter (control) | firmware crash on every page |
+| closed batches of 4 and 8 | about 110,000 scenes, no hang or crash |
+
+So Finalize3D word 5 and descriptor +0x50 name one counter, compared with
++0x00 as the number of scenes using the registration. Raising +0x00 while
+scenes are in flight races the firmware's cleanup decision (decided at
+equality, not revocable). The contributor's proposed admission rule: keep the
+newest scene's fragment unpublished, raise the target, then publish
+(`REVIEW-BATCH-ADMISSION.md`); not built. Batches cut short by a VM or free-list
+change end below their target (counter 1, 2 or 4 of 8) and are never
+unregistered before the next reset; that did not crash but is not shown safe.
+
+**What it is worth:** little. With batches of 4 or 8, field 44.6-47.1,
+fishtank 35.3-37.0, aquarium 46.9-50.6, dynamic-cubemap 43.7-44.3 fps, against
+44-45, 32-34, 49 and 40-44 without overlap (Mesa `9b6c177a649`). 36% of scenes
+still drain: every frame alternates Firefox's WebGL process and its
+compositor, two VMs and free lists. Overlap across them would need one
+descriptor and ID per pool (the firmware allows several registrations);
+untested. Not pursued further for 0.3.
+
 Before the drain, overlap hung at scenes 194-578 with a fragment-side GPU MMU
 fault (status 0x40c359: read of address 0, context 4, requester 13) after a
 type-4 event {4, 0, 0, 2} (a firmware recovery that waits for a host
