@@ -1339,20 +1339,35 @@ both attempts; later work in "Where field's frame time goes" below.
 shader. `eb839e973e3` ("Firefox and WebGL on the A10") holds more
 (`G9P_TIME`, `G9P_CAPTURE`, ...).
 
-## Where field's frame time goes (2026-11-10, Mesa main `7713552afa2`, orchard `de8f6a0`)
+## Where field's frame time goes (2026-11-10, Mesa main `d4ad01b1bcc`, orchard `de8f6a0`)
 
-field (webglsamples) went from 33.7 to about 42 fps; 60 needs a frame of
-16.7 ms instead of about 24.
+field (webglsamples) runs about 35 fps on main; 60 needs a frame of 16.7 ms
+instead of about 28. The kernel side of RENDER.md "Scenes in flight,
+continued" (per-job command areas, scheduling token, retirement watermark)
+is on main; scene overlap itself (+11% on field and fishtank) stays an
+experiment.
 
-**Landed.** Vertex tasks hold up to 256 register-instances without
-rounding down to a power of two (Mesa `7713552afa2`): field's 20-register grass
-shader runs 12 instances per task instead of 8, 38 -> 42 fps. Transform
-feedback keeps the power of two: its separate-buffer captures hung the
-geometry job with 12. dEQP-GLES3 vertex_arrays (1005), instanced (45), draw
-(323) and transform_feedback (987) pass. The kernel side of RENDER.md "Scenes
-in flight, continued" (per-job command areas, scheduling token, retirement
-watermark) landed with it; scene overlap itself (+11% on field and fishtank)
-stays an experiment.
+**Render pass merging (Mesa `d4ad01b1bcc`).** A dynamic render is kept open
+at its end; the next one continues it when it only loads the same
+attachments over the same area. Zink's global barrier between them (colour
+and depth attachment writes to fragment shader reads) is held back; before
+each draw of the continuation the sampled textures' descriptor addresses
+are checked against the open attachments, and a match splits the render
+there (barrier replayed, continuation begun again with loads). field
+31 -> 35 fps (its 4x MSAA backbuffer is cleared and then loaded for the
+depth-of-field draw); aquarium, fishtank, dynamic-cubemap unchanged.
+`G9P_NO_MERGE=1` turns it off; `G9P_RPLOG` logs renders, merges and splits.
+
+**Reverted: vertex tasks without power-of-two rounding** (Mesa `7713552afa2`,
+reverted by `d0686ce6315`). 12 instances for a 20-register shader made field
+38 -> 42 fps and passed dEQP's vertex groups, but the aquarium then hung its
+geometry job twice per 40 s run (a vertex task that never finishes, as with
+too many instances). Which shaders and counts stall is open; test the
+aquarium, not only dEQP, before trying again.
+
+**Open:** dEQP-GLES3 `fbo.multiview.samples_{1,2,4}` fail on current main and
+on `91afab1780e` (passed after `be8219fcd76`); the tablet's userspace (system
+Zink) changed since.
 
 **How it was measured.** A per-job timing ring in the kernel (dev tree,
 debugfs `pvr_apple_jobtimes`: run, doorbell and completion times;
@@ -1377,16 +1392,17 @@ after the previous one completes); at least 216 us (fragment) and 107 us
 | 256x256 blur | 0.15 ms | 0.89 ms |
 
 **The lead: multisampling.** The two expensive single-draw passes draw into
-field's 4x antialiased WebGL backbuffer (the pass trace's sample count,
-Mesa branch `g9p-experiments`). Each moves the four samples per pixel to or
-from memory (16 MiB) instead of keeping them in tile memory. With Firefox's
+field's 4x antialiased WebGL backbuffer (the pass trace's sample count).
+Each moves the four samples per pixel to or from memory (16 MiB) instead of
+keeping them in tile memory. Per frame (`G9P_RPLOG`): a render clearing the
+4x colour and depth (both stored), one loading the colour for the
+depth-of-field draw (merged now, above), and a shader resolve into a
+single-sampled image (Zink resolves by a draw, not a resolve attachment).
+Firefox uses `EXT_multisampled_render_to_texture` only as one source of
+multisampled renderbuffers, so `VK_EXT_multisampled_render_to_single_sampled`
+would not change its WebGL path. With Firefox's
 `webgl.msaa-samples=0` (a measurement, not a fix) field runs 47-49 fps
-instead of 37-40. Directions: resolve at the end of the tile when the render
-has a resolve attachment and skip storing samples that are not needed, or
-`VK_EXT_multisampled_render_to_single_sampled` (Zink then offers GL's
-`EXT_multisampled_render_to_texture`; whether Firefox uses it here is
-unchecked). The exact load/store sequence of the three passes is the next
-thing to trace. The resolve does not run on the CPU (the transfer path's
+instead of 37-40. The resolve does not run on the CPU (the transfer path's
 `resolve()` exists, but no multisampled transfer happens in field).
 
 **Ruled out by measurement** (field, two runs each): completion polling
