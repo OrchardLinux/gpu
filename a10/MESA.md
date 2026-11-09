@@ -1320,7 +1320,7 @@ jobs; pages with about ten passes a frame (field, dynamic-cubemap) lose
 several ms per frame, and Firefox itself copies each frame three times
 (canvas copy, page composite, Labwc composite, about 7.6 ms on the aquarium).
 Overlapping scenes (RENDER.md "Scenes in flight") crashed the firmware in
-both attempts; parked, the code only in a local development tree.
+both attempts; later work in "Where field's frame time goes" below.
 
 **Found and open**:
 
@@ -1338,6 +1338,72 @@ both attempts; parked, the code only in a local development tree.
 `G9P_VS_REGLOG`, `G9P_PRESSURE`; `G9P_PASSLOG` also reports blends left to the
 shader. `eb839e973e3` ("Firefox and WebGL on the A10") holds more
 (`G9P_TIME`, `G9P_CAPTURE`, ...).
+
+## Where field's frame time goes (2026-11-10, Mesa main `7713552afa2`, orchard `de8f6a0`)
+
+field (webglsamples) went from 33.7 to about 42 fps; 60 needs a frame of
+16.7 ms instead of about 24.
+
+**Landed.** Vertex tasks hold up to 256 register-instances without
+rounding down to a power of two (Mesa `7713552afa2`): field's 20-register grass
+shader runs 12 instances per task instead of 8, 38 -> 42 fps. Transform
+feedback keeps the power of two: its separate-buffer captures hung the
+geometry job with 12. dEQP-GLES3 vertex_arrays (1005), instanced (45), draw
+(323) and transform_feedback (987) pass. The kernel side of RENDER.md "Scenes
+in flight, continued" (per-job command areas, scheduling token, retirement
+watermark) landed with it; scene overlap itself (+11% on field and fishtank)
+stays an experiment.
+
+**How it was measured.** A per-job timing ring in the kernel (dev tree,
+debugfs `pvr_apple_jobtimes`: run, doorbell and completion times;
+`tools/a10/tools/jobtimes.py`) and the pass trace (`G9P_TRACE`) share
+`CLOCK_MONOTONIC`, so each Firefox pass is matched to its GPU jobs by
+submission time. `G9P_TIME` with `G9P_SYNC` measures from submission, so its
+geometry times include waiting for the previous pass; the scheduler trace's
+run-to-done includes the kernel's own waits before the doorbell.
+
+Per field frame (serialized): fragment-bound, fragment engine busy 66% and
+geometry 28%; about 5 ms with no job in flight (Firefox submits each pass
+after the previous one completes); at least 216 us (fragment) and 107 us
+(geometry) from doorbell to completion even for trivial jobs.
+
+| Pass (Firefox / field) | Geometry | Fragment |
+|---|---|---|
+| field's scene, 1024², 101 draws | 2.6 ms | 1.14 ms |
+| 1024² **4x MSAA**, loaded, 1 draw | 0.17 ms | 2.68 ms |
+| 1024² **4x MSAA**, cleared, 1 draw (depth of field) | 0.20 ms | 2.36 ms |
+| page composite 1536x1972, 10-13 draws | 0.2-0.8 ms | 2.3-3.2 ms |
+| 1024², loaded, 1 draw | 0.23 ms | 1.68 ms |
+| 256x256 blur | 0.15 ms | 0.89 ms |
+
+**The lead: multisampling.** The two expensive single-draw passes draw into
+field's 4x antialiased WebGL backbuffer (the pass trace's sample count,
+Mesa branch `g9p-experiments`). Each moves the four samples per pixel to or
+from memory (16 MiB) instead of keeping them in tile memory. With Firefox's
+`webgl.msaa-samples=0` (a measurement, not a fix) field runs 47-49 fps
+instead of 37-40. Directions: resolve at the end of the tile when the render
+has a resolve attachment and skip storing samples that are not needed, or
+`VK_EXT_multisampled_render_to_single_sampled` (Zink then offers GL's
+`EXT_multisampled_render_to_texture`; whether Firefox uses it here is
+unchecked). The exact load/store sequence of the three passes is the next
+thing to trace. The resolve does not run on the CPU (the transfer path's
+`resolve()` exists, but no multisampled transfer happens in field).
+
+**Ruled out by measurement** (field, two runs each): completion polling
+(`apple_poll_us` 100 vs 20 us), loading the destination (skipping it for
+1024-wide targets), the alpha-keeping tile read of RGB-only write masks,
+tiling field's own render targets, two jobs per engine with the firmware
+(`apple_queue_depth=2`). Firefox's `widget.dmabuf-webgl.enabled=false` drops
+field to 3 fps: DMA-BUF sharing is the fast path.
+
+**Micro-benchmark.** `mesa/vk-tri` now has `TRI_NOREADBACK=1` and
+`TRI_UPLOAD_ONCE=1`: without them its `TRI_REPEAT` times include the readback
+and the texture upload, which dominated the first comparisons. Clean,
+single-sampled, 1024x1024 target: clear and store 0.55 ms (fixed per-pass cost
+included), a textured triangle 0.73-0.86 ms with a 512² to 2048² texture,
+linear and twiddled textures alike; field's depth-of-field shader
+(`gl_FragCoord` coordinates, mediump or highp) 0.72 ms. Sampling and shader
+code are not what makes field's passes slow.
 
 ## Roadmap (2026-11-03)
 

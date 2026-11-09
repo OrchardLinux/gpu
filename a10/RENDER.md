@@ -1131,4 +1131,84 @@ The first overlap attempt (two slots, two free-list ids) crashed the
 firmware: free list 1 was never registered. The second attempt
 (2026-11-09: eight rotating slots, one free list, the descriptor rebuilt only
 with no scene in flight) also crashed the firmware once two scenes were in
-flight. Parked; the code is kept only in a local development tree.
+flight. Continued below.
+
+### Scenes in flight, continued (2026-11-09/10)
+
+With complete crash dumps and a contributor's review of them against the
+firmware image (gfx-t8010.bin, the iPadOS 17 one), the overlap failures turned
+into four separate protocol facts. Three are fixed on main (orchard
+`kernel/patches/drivers/gpu/0010-0012`, orchard `de8f6a0`); they are correct
+without overlap as well.
+
+- **Scheduling token (0011).** The firmware takes a DAG scheduling-entry
+  index from bits 8-14 of a command's token (geometry +0x558, fragment
+  +0x8a4), checks it against the channel's next expected entry and advances
+  by one, modulo 128; a mismatch is the panic "DAG: Non Sequential Stamp
+  Updates seen entryIdx 0x0 roots.dag 0x1". A switch of channel rebinds from
+  the entry given, which is why entry 0 everywhere worked while geometry and
+  fragment commands alternated. The token is now
+  `((seq % 128) << 8) | (seq & 0xff)`, seq counting the channel's commands.
+  PM slots and scheduling entries are separate resources.
+- **Command lifetime (0010).** The firmware reads a fragment command again
+  when the job retires, after its Finalize3D completion stamp (the free-list
+  pointer at +0x20 read once valid, then zero, then a fault at fw 0x12c02).
+  Each engine had one command area, cleared for the next job. Geometry and
+  fragment jobs now rotate over 3 and 4 areas of 0x1000 bytes in heap
+  descriptor 1 (0x61000, 0x5d000). Heap descriptor 1 maps only 0x50000-0x90000:
+  a first placement at 0xa0000 crashed on the first geometry job. A second
+  placement overlapped the firmware trace buffers (records 0x64000,
+  control 0x68000, then hard-coded); every allocation there is now named
+  and checked for overlaps when the layout is built.
+- **Retirement watermark (0012).** Type-1 events are notifications, not
+  counts (payload 4 is a bitmap: scheduling slot 2); the firmware accumulates
+  retirements and may announce several with one event. Fragment command
+  +0x89c is the address of a retirement stamp: the firmware writes the
+  command's token there after the retirement cleanup, conditional free-list
+  unregister included, then publishes the event. Every fragment command now
+  names one persistent word (heap 0x76000); fences and the gate before the
+  next geometry job read it as a watermark (low byte = seq). Neither the
+  execution stamp nor the ring consumer index shows the unregister finished:
+  counting the ring index instead let a geometry job through too early and
+  the firmware crashed.
+- **Free-list lifetime (open).** Fragment retirement unregisters the free
+  list when `*(descriptor + 0x50) == descriptor[0x00]` (fw 0x12bfe); our
+  descriptor leaves both at zero, so every retirement unregisters, and a
+  geometry job registered in between loses its registration (Start3D then
+  loads a null table entry, fw 0x16634). The iPadOS 17 builder
+  (`FUN_fffffff006040ba8`, Darwin 23.6 kernelcache) also zeroes both
+  (+0x00, and a separate 4-byte buffer that +0x50 points to); no host function
+  near it writes them later, and a trace showed neither changing in our runs.
+  The iOS 10 page-list record chain (0x84-byte records, a link and 32 page
+  numbers per 128 KiB block) is not a verified mapping of these fields. iOS 17
+  takes the free-list index per context (StartTA word 11 from context +0xce0);
+  our driver uses free list 0 for every context.
+
+**Experiments, local only** (`trees/linux-z2-stall-evidence`, branch
+`g9p-submit-order`): rotating PM slots (`apple_overlap`), a diagnostic head
+word that keeps the free list registered (not a fix: it skips the unregister
+and its state writeback), a drain that allows overlap only while consecutive
+scenes share the VM and the free-list object, a first-recovery-event
+snapshot (debugfs `pvr_apple_recovery`: heap and window), the whole crash
+dump in debugfs (`pvr_apple_crashlog`; not mergeable as is, its replacement
+races readers), a per-job timing ring (`pvr_apple_jobtimes`, see
+`tools/a10/tools/jobtimes.py`) and `apple_queue_depth` (more than one job per
+engine with the firmware). With all of them: field 33.7 -> 37.3 fps,
+fishtank 32.8 -> 36.7, dynamic-cubemap unchanged; 36,000 aquarium scenes
+without a hang with the drain, one firmware crash in a dynamic-cubemap run.
+Two jobs per engine run cleanly with the watermark but bring nothing on these
+pages: Firefox submits its next pass only after the previous one completes.
+
+Before the drain, overlap hung at scenes 194-578 with a fragment-side GPU MMU
+fault (status 0x40c359: read of address 0, context 4, requester 13) after a
+type-4 event {4, 0, 0, 2} (a firmware recovery that waits for a host
+handshake the driver does not give). The submission code preserved the shared
+descriptor by scene counters, not by whether the next scene used the same pool
+(the job's `struct pvr_free_list` reached `pvr_apple_queue_render()` unused).
+
+Evidence (dumps, logs, diffs, the contributor's reviews): the maintainer's
+archive `gpu-overlap-crash-2026-11-09/` (not in this repository: firmware
+crash state). To finish overlap: one descriptor, free-list id and
+registration per actual pool and VM, carried unchanged through geometry,
+fragment and retirement, every id registered before use, reuse deferred
+until retirement.

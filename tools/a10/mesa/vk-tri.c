@@ -64,6 +64,10 @@
  *   TRI_REPEAT=N       submit the command buffer N more times, each waited
  *                      for, and print the submit-to-fence times (the cost
  *                      of one render, or of TRI_LOAD's two)
+ *   TRI_NOREADBACK=1   leave the readback copy out of the command buffer,
+ *                      so TRI_REPEAT times only the render (no pixel check)
+ *   TRI_UPLOAD_ONCE=1  upload the texture in its own submission first
+ *                      instead of in every repeated one
  *
  * Built by mesa/build-vk-test.sh; run in the device chroot:
  *
@@ -735,8 +739,24 @@ int main(int argc, char **argv)
 		CHECK(vkCreateCommandPool(dev, &pci, NULL, &pool));
 		ai.commandPool = pool;
 		CHECK(vkAllocateCommandBuffers(dev, &ai, &cmd));
+		/* TRI_UPLOAD_ONCE=1: the texture upload in its own submission, before the timed renders */
+		if (tex_staging && getenv("TRI_UPLOAD_ONCE")) {
+			VkCommandBuffer up;
+			VkBufferImageCopy r = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
+						.imageExtent = { tex_w, tex_h, 1 } };
+			VkSubmitInfo usi = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+					     .commandBufferCount = 1, .pCommandBuffers = &up };
+
+			CHECK(vkAllocateCommandBuffers(dev, &ai, &up));
+			CHECK(vkBeginCommandBuffer(up, &bi));
+			vkCmdCopyBufferToImage(up, tex_staging, tex_image, VK_IMAGE_LAYOUT_GENERAL, 1, &r);
+			memory_barrier(up);
+			CHECK(vkEndCommandBuffer(up));
+			CHECK(vkQueueSubmit(queue, 1, &usi, VK_NULL_HANDLE));
+			CHECK(vkQueueWaitIdle(queue));
+		}
 		CHECK(vkBeginCommandBuffer(cmd, &bi));
-		if (tex_staging) {
+		if (tex_staging && !getenv("TRI_UPLOAD_ONCE")) {
 			VkBufferImageCopy r = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
 						.imageExtent = { tex_w, tex_h, 1 } };
 
@@ -840,7 +860,7 @@ int main(int argc, char **argv)
 				memcpy(clear, c3, sizeof(c3));
 			}
 		}
-		if (readback) {
+		if (readback && !getenv("TRI_NOREADBACK")) {
 			VkBufferImageCopy r = { .imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 },
 						.imageExtent = { W, H, 1 } };
 
