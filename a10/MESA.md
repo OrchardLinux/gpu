@@ -693,7 +693,9 @@ grabs is its box still growing: correct.
   render 73 after a firmware start; 1000: within a few renders).
   `pvr-tri TRI_INSTANCES=1000 TRI_REPEAT=300`, three runs each: VDM_STATE5
   `0x1081` (8 registers) x 32 and `0x1c81` (14) x 4/8/16 pass, `0x1c81` x 32
-  hangs by render 17. The fork keeps registers x instances at 256.
+  hangs by render 17. The fork keeps registers x instances at 256, rounded
+  down to an even count (odd counts stall too; see "Where field's frame time
+  goes").
 - **Ruled out on the way** (heap and window dumps per batch, register reads
   during the stall, the firmware trace): free-list order and size, a lost
   doorbell (a second one does nothing), the shared scheduling entry
@@ -1339,10 +1341,10 @@ both attempts; later work in "Where field's frame time goes" below.
 shader. `eb839e973e3` ("Firefox and WebGL on the A10") holds more
 (`G9P_TIME`, `G9P_CAPTURE`, ...).
 
-## Where field's frame time goes (2026-11-10, Mesa main `d4ad01b1bcc`, orchard `de8f6a0`)
+## Where field's frame time goes (2026-11-10, Mesa main `9b6c177a649`, orchard `de8f6a0`)
 
-field (webglsamples) runs about 35 fps on main; 60 needs a frame of 16.7 ms
-instead of about 28. The kernel side of RENDER.md "Scenes in flight,
+field (webglsamples) runs about 44 fps on main; 60 needs a frame of 16.7 ms
+instead of about 23. The analysis below was measured at `d4ad01b1bcc` (35 fps). The kernel side of RENDER.md "Scenes in flight,
 continued" (per-job command areas, scheduling token, retirement watermark)
 is on main; scene overlap itself (+11% on field and fishtank) stays an
 experiment.
@@ -1358,12 +1360,21 @@ there (barrier replayed, continuation begun again with loads). field
 depth-of-field draw); aquarium, fishtank, dynamic-cubemap unchanged.
 `G9P_NO_MERGE=1` turns it off; `G9P_RPLOG` logs renders, merges and splits.
 
-**Reverted: vertex tasks without power-of-two rounding** (Mesa `7713552afa2`,
-reverted by `d0686ce6315`). 12 instances for a 20-register shader made field
-38 -> 42 fps and passed dEQP's vertex groups, but the aquarium then hung its
-geometry job twice per 40 s run (a vertex task that never finishes, as with
-too many instances). Which shaders and counts stall is open; test the
-aquarium, not only dEQP, before trying again.
+**Vertex tasks: even instance counts** (Mesa `9b6c177a649`). The instance
+count per vertex task (registers x instances <= 256) was rounded down to a
+power of two: 8 for a 20-register shader where 12 fit. The first attempt
+used every count that fits (`7713552afa2`, reverted by `d0686ce6315`): the
+aquarium hung its geometry job twice per 40 s run. With a temporary switch
+on the tablet (all counts, even only, multiples of 4, power of two) the
+hang followed the odd counts: 9 instances for its 28-register shader. Even
+counts ran the aquarium three times without a hang; multiples of 4 also
+ran clean once, then the tablet crashed (not reproduced, not attributed).
+Transform feedback keeps the power of two (its separate-buffer captures
+hung with 12). field 38 -> 44 fps with merging on (`G9P_VS_MAXINST=8` gives
+the old count for its main shader), aquarium 49 fps, fishtank 32,
+dynamic-cubemap 40, electricflower 56, no hangs; dEQP-GLES3 vertex_arrays,
+instanced, draw, transform_feedback: 2360 pass, 333 not supported. Why odd
+counts stall is not known.
 
 **Open:** dEQP-GLES3 `fbo.multiview.samples_{1,2,4}` fail on current main and
 on `91afab1780e` (passed after `be8219fcd76`); the tablet's userspace (system
