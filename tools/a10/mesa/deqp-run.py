@@ -263,6 +263,9 @@ def cmd_run(args):
         env["LIBGL_ALWAYS_SOFTWARE"] = "1"
     if args.gles_override:
         env["MESA_GLES_VERSION_OVERRIDE"] = args.gles_override
+    for kv in args.env or []:
+        k, _, v = kv.partition("=")
+        env[k] = v
 
     device = Device(args.device_cmd)
     if not args.software and args.suite in RENDERER_CASES:
@@ -430,6 +433,7 @@ def main():
     r.add_argument("--filter", help="regular expression on the case name")
     r.add_argument("--skip-file", help="file of fnmatch patterns to leave out")
     r.add_argument("--gles-override", choices=["3.0", "3.1"])
+    r.add_argument("--env", action="append", metavar="KEY=VALUE", help="extra environment, e.g. G9P_REGS=12 to force registers above r31")
     r.add_argument("--batch", type=int, default=500)
     r.add_argument("--timeout", type=float, default=60.0, help="seconds without output that count as a hang")
     r.add_argument(
