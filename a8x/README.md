@@ -4,7 +4,8 @@ This is a field report on GPU work for the iPad Air 2 Wi-Fi (`iPad5,3`, J81,
 Apple A8X/T7001, Imagination PowerVR GXA6850). It records experiments on one
 physical device and offline analysis of Apple kernelcaches through
 8 November 2026. It is not a driver, a device-profile change or a procedure.
-J81's `gpu = "missing"` in `devices/j81/device.toml` is unchanged.
+J81's `gpu = "missing"` in Orchard's
+[`devices/j81/device.toml`](https://github.com/OrchardLinux/orchard/blob/main/devices/j81/device.toml) is unchanged.
 
 The work was done in [mattonik/ipad-nixos](https://github.com/mattonik/ipad-nixos)
 on Linux 7.3.0-rc1 (Hoolock `6831bc7`, the same pin as Orchard's `apple-4k`

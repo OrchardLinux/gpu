@@ -11,6 +11,7 @@ and [OrchardLinux/mesa](https://github.com/OrchardLinux/mesa) (Vulkan).
 | Chip | Devices | State | Notes |
 |---|---|---|---|
 | A10 (T8010) | iPad 6 (J71b) | Hyprland with all effects at 60 fps (Zink on the G9P Vulkan driver) | [a10/](a10/README.md) |
+| A8X (T7001) | iPad Air 2 (J81) | Power-up reached; the first GPU register read hangs | [a8x/](a8x/README.md) |
 
 More chips join as their own directories. The A9 (iPad 5) work is
 separate for now.
