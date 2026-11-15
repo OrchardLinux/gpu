@@ -3,7 +3,7 @@
 This is a field report on GPU work for the iPad Air 2 Wi-Fi (`iPad5,3`, J81,
 Apple A8X/T7001, Imagination PowerVR GXA6850). It records experiments on one
 physical device and offline analysis of Apple kernelcaches through
-8 November 2026. It is not a driver, a device-profile change or a procedure.
+12 November 2026. It is not a driver, a device-profile change or a procedure.
 J81's `gpu = "missing"` in Orchard's
 [`devices/j81/device.toml`](https://github.com/OrchardLinux/orchard/blob/main/devices/j81/device.toml) is unchanged.
 
@@ -11,8 +11,8 @@ The work was done in [mattonik/ipad-nixos](https://github.com/mattonik/ipad-nixo
 on Linux 7.3.0-rc1 (Hoolock `6831bc7`, the same pin as Orchard's `apple-4k`
 layer). The detailed notes are under that repository's
 [`research/`](https://github.com/mattonik/ipad-nixos/tree/main/research)
-directory. Start from
-[`research/gpu-status.md`](https://github.com/mattonik/ipad-nixos/blob/main/research/gpu-status.md).
+directory. The latest results and supporting notes are on the
+[J81 research branch](https://github.com/mattonik/ipad-nixos/blob/j81-dwi-gpu-compare/research/gpu-status.md).
 
 ## Measured on the J81 device
 
@@ -21,12 +21,36 @@ directory. Start from
 | GFX power | A guarded PMGR power cycle of the GFX domain finished and the PMGR register read back `0x3ff` (target and actual state 15). | Shows only that the power state was reached. It does not show that the clocks or resets the core needs are correct. |
 | Bridge tables | The GFX bridge selectors 9 and 10 were replayed as 66 32-bit stores (33 per selector) to `0x201f00018`, `0x201f40000`–`0x201f4007c`, `0x201f80018` and `0x201fc0000`–`0x201fc007c`. Every software checkpoint passed. | Only `0x201f00018 = 0x80010004` was read back from the table targets. The other 65 stores are unverified. |
 | GPC | GPC init (reg index 1, `0x201e00000`) reported state 1. | — |
-| RGX identity | The first core-ID read at `0x201000020` (reg index 0, offset `+0x20`) never completed. The device hung and USB networking dropped. | Cause unknown. No subsequent core-ID test has been run. |
+| RGX identity | The first core-ID read at `0x201000020` (reg index 0, offset `+0x20`) never completed. The device hung and USB networking dropped. | Cause unknown. A later attempt after restoring 20 power domains also returned no value; see below. |
 | MCC | One later, watchdog-supervised read returned `0x200000830 = 0`. | The value does not show the MCC state. |
 
-No GPU firmware has run, no job has been submitted and no frame has been
-rendered. A8X has no EL2, so m1n1 hypervisor MMIO tracing of iOS is not
+No GPU firmware has been demonstrated on Linux, no job has been submitted and
+no frame has been rendered. A8X has no EL2, so m1n1 hypervisor MMIO tracing of iOS is not
 possible on this SoC.
+
+### Later iPadOS and Linux comparisons (11–12 November)
+
+These observations are from one J81 and different instrumented boots; the
+checkpoints do not establish equivalent overall hardware state.
+
+| Comparison | Observation | Boundary |
+| --- | --- | --- |
+| Page 5, `0x20e005004` | iPadOS read `0` before GPC bring-up and `0x40000000` after the GPC poll. Linux read `0` less than 750 ns after the successful poll, even after restoring 20 power domains. | Earlier transient values are unobserved. Bit 30's function and whether it causes the Linux stall remain unknown. |
+| Power transport | With DWI enabled before GPC, a candidate PMU row changed; the same sampled row also changed after the 20-domain restore. | Its physical rail and actual voltage have not been independently identified. DWI alone did not make the page-5 sample match iPadOS. |
+| PMGR `0x2300c` | iPadOS sampled `0` early and `0x164` after GPU identity; Linux sampled the same values before and after GPC. | Sampling boundaries differ. This does not establish equal PMU requests or voltage. |
+| Store attribution | An iPadOS probe reached two candidate 32-bit store sites and passed synthetic recording controls, with no real matching store recorded to the watched virtual address. | Other sites, widths, aliases, firmware or hardware activity remain possible; the source of bit 30 is unresolved. |
+| Linux core ID after restoring 20 domains | The host acknowledged the pre-read checkpoint but received no result; the iPad later rebooted into iPadOS. | The trace does not prove the read was issued or identify a fault or its cause. |
+
+See the detailed [20-domain comparison][wide-result], [core-read result][core-result],
+[iPadOS PMGR comparison][rail-result], and [store-attribution capture][store-result].
+An iPadOS-to-Linux warm handoff is an [offline feasibility question][warm-result],
+not a working path; safe shutdown and retention of GPU state are unproven.
+
+[wide-result]: https://github.com/mattonik/ipad-nixos/blob/j81-dwi-gpu-compare/research/2026-11-11-j81-wide-power-result.md
+[core-result]: https://github.com/mattonik/ipad-nixos/blob/j81-dwi-gpu-compare/research/2026-11-11-j81-wide-power-core-read.md
+[rail-result]: https://github.com/mattonik/ipad-nixos/blob/j81-dwi-gpu-compare/research/2026-11-12-j81-ios-railcompare-result.md
+[store-result]: https://github.com/mattonik/ipad-nixos/blob/j81-dwi-gpu-compare/research/2026-11-12-j81-page5-store-attribution-result.md
+[warm-result]: https://github.com/mattonik/ipad-nixos/blob/j81-dwi-gpu-compare/research/2026-11-12-j81-warm-handoff-feasibility.md
 
 ### GFX perf-state table: snapshot with GFX off
 
@@ -157,9 +181,9 @@ GPU performance level are separate state concepts. See the [format comparison][p
   record eligible for the optional selector-1 counter read. Offline analysis
   shows that the `bcc56c` path calls `bd6328` with selector 1, which reads
   PMGR counter values and performs no register store; `bcc56c` does not use
-  the other selectors. The captured ADT's energy-counter list omits GFX and
-  has no `state-config` property, which suggests but does not prove that no
-  eligible GFX record exists. The runtime object/class at `pmgr+0x160` and
+  the other selectors. The captured ADT energy-counter list omits GFX; a later trace identifies
+  `hw-dpe-reg` as the relevant record property, which was absent in the saved
+  live registry. This weakens the candidate but does not exclude it. The runtime object/class at `pmgr+0x160` and
   the record values remain inferred or unknown. See the [selector-1 and
   SoC-tuner analysis](https://github.com/mattonik/ipad-nixos/blob/1ed4af067c1be8fc2bce5a37fbf69504add9e32b/research/2026-11-08-j81-ios15-soc-tuner-device-sets.md)
   and [PMGR timing-call review](https://github.com/mattonik/ipad-nixos/blob/799304d07a26c3b88d0a1b6a02b2e790db77d459/research/2026-11-08-j81-ios15-bcc56c-timing-accounting.md).
@@ -169,11 +193,10 @@ GPU performance level are separate state concepts. See the [format comparison][p
   whether or when the busy notification reaches that policy on the pre-ID
   path. The G4G clock-enable path itself does not call the tuner, and test4
   did not reproduce this callback. See the [SoC-tuner analysis](https://github.com/mattonik/ipad-nixos/blob/1ed4af067c1be8fc2bce5a37fbf69504add9e32b/research/2026-11-08-j81-ios15-soc-tuner-device-sets.md).
-- Obtain a read-only perf-table snapshot immediately after the guarded GFX
-  power-up, with the required `gpu-pmgr-once` device-tree guard. The current
-  pre-power snapshot cannot answer which state is selected after power-up.
+- Establish the selected GFX performance state after power-up; observed control
+  words and table contents do not yet identify it.
 - Check any remaining iBoot/iBEC state that a checkm8/PongoOS boot does not
   preserve; the LLB/iBoot analysis confirms that LLB programs the table and
   iBoot reads it, but it did not identify a software state-select write.
-- Do not repeat the RGX core-ID read, guess clocks or resets, or write MCC
-  registers until one of these gives a concrete register difference.
+- Resolve which state drives page-5 bit 30 and whether it matters for core
+  access before drawing a causal conclusion or proposing another core read.
