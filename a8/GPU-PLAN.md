@@ -36,7 +36,7 @@ Sources: the five investigations are tagged [a10-method], [j96-adt], [j96-kexts]
    - Boot and loader: mainline pvr_fw_meta.c and pvr_fw_startstop.c. [lead] confirmed that the local tree has meta_ldr_cmd_loadmem, meta_ldr_cmd_zeromem and meta_ldr_cmd_config, and META_SP_MSLVCTRL1 polling, in pvr_fw_meta.c lines 41–204.
    - Device attachment (static device info, Apple pwr_ops, no IMG header) and the job/queue layer: the A10 pvr_apple*.c structure.
    - The A10 RTKit, mailbox, window and G9P init data (X/P/T/U/V, 13 rings): discard. Nothing of it applies.
-5. **m1n1 OPP fill.** [a10-method] and [orchard-patches] say m1n1 fills the GPU OPP table from sgx perf-states. [lead] checked the local m1n1 trees: /home/tcballard/Projects/orchard-hardware/boot/m1n1/patches contains only j71b/0001-j71b-boot-support.patch, and /home/tcballard/Projects/orchard-omarchy-a/boot/m1n1/patches contains only j71b/0002-omarchy-splash.patch. Grepping both for sgx or gpu finds nothing. **The J96 m1n1 build does not have orchard patch 0011.** DVFS needs that patch or a static OPP table in the DT.
+5. **m1n1 OPP fill.** [a10-method] and [orchard-patches] say m1n1 fills the GPU OPP table from sgx perf-states. [lead] checked the local m1n1 trees: ~/Projects/orchard-hardware/boot/m1n1/patches contains only j71b/0001-j71b-boot-support.patch, and ~/Projects/orchard-omarchy-a/boot/m1n1/patches contains only j71b/0002-omarchy-splash.patch. Grepping both for sgx or gpu finds nothing. **The J96 m1n1 build does not have orchard patch 0011.** DVFS needs that patch or a static OPP table in the DT.
 6. **Is the unstripped iOS 10 tree a G4P reference?** [a10-method] lists AGXFirmwareKextG4P among the T8010 and s8000 trees. Whether a G4P driver (AGXG4P / AGXAcceleratorG4P with symbols) is in there is not established. [lead] tried the GitHub API and the request failed: 'curl: (35) TLS connect error'. This stays open, and it is a cheap, high-value check (see M2).
 
 ## 2. Best route and hard blockers
@@ -197,7 +197,7 @@ GPU acceleration on J96 is **feasible in principle but a substantially bigger pr
 ## Files
 
 - Scratch area: /tmp/claude-1000/-home-tcballard-Projects/7aa9af37-4e91-48e5-a2e7-64bd8932ea91/scratchpad/gpu/
-- Local META LDR loader: /home/tcballard/Projects/iomarchy-j96-tNPWSDe4/build/linux-src-touchbus/drivers/gpu/drm/imagination/pvr_fw_meta.c
-- Local m1n1 patch sets (no sgx pstate patch in either): /home/tcballard/Projects/orchard-hardware/boot/m1n1/patches/j71b/ and /home/tcballard/Projects/orchard-omarchy-a/boot/m1n1/patches/j71b/
-- Kernelcache: /home/tcballard/Projects/j96-touch-20261030/downloads/kernel/19H386__iPad5,1/kernelcache.release.iPad5,1_2
-- ADT: /home/tcballard/Projects/j96-touch-20261030/private/j96-adt-20261030.bin
+- Local META LDR loader: ~/Projects/iomarchy-j96-tNPWSDe4/build/linux-src-touchbus/drivers/gpu/drm/imagination/pvr_fw_meta.c
+- Local m1n1 patch sets (no sgx pstate patch in either): ~/Projects/orchard-hardware/boot/m1n1/patches/j71b/ and ~/Projects/orchard-omarchy-a/boot/m1n1/patches/j71b/
+- Kernelcache: ~/Projects/j96-touch-20261030/downloads/kernel/19H386__iPad5,1/kernelcache.release.iPad5,1_2
+- ADT: ~/Projects/j96-touch-20261030/private/j96-adt-20261030.bin

@@ -5,7 +5,9 @@ name: J96 KPF page-5 probe
 on:
   workflow_dispatch:
   push:
-    branches: ['a8-bringup']
+    branches: [main]
+    paths: ['tools/a8/kpf/**', '.github/workflows/a8-kpf.yml']
+  pull_request:
     paths: ['tools/a8/kpf/**', '.github/workflows/a8-kpf.yml']
 permissions:
   contents: read

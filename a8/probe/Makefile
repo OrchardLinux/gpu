@@ -3,7 +3,7 @@
 #   make clean
 obj-m := apple-j96-gpudump.o apple-j96-gpubridge.o
 
-KDIR ?= /home/tcballard/Projects/iomarchy-j96-tNPWSDe4/build/linux-j96dev
+KDIR ?= $(error set KDIR to the J96 kernel build directory)
 # The kernel is built with clang (CONFIG_CC_IS_CLANG), so build the module with LLVM too.
 
 all:

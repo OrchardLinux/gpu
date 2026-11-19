@@ -1,5 +1,5 @@
---- /tmp/claude-1000/-home-tcballard/9d353325-863e-47af-ab58-a70e632904eb/scratchpad/apple-j96-gpuprobe.c.orig	2026-11-17 10:11:04.907988980 +0000
-+++ /home/tcballard/Projects/iomarchy-j96-tNPWSDe4/build/linux-src-touchbus/drivers/misc/apple-j96-gpuprobe.c	2026-11-17 10:37:28.133970491 +0000
+--- a/drivers/misc/apple-j96-gpuprobe.c
++++ b/drivers/misc/apple-j96-gpuprobe.c
 @@ -344,3 +344,124 @@
  module_platform_driver(j96gp_driver);
  MODULE_DESCRIPTION("J96 GPU power and identity bring-up probe (read-only identity, gated)");

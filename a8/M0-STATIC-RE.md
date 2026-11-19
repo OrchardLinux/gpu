@@ -414,5 +414,4 @@ Mainline reference: `pvr_fw_meta.c` (`pvr_meta_fw_process`, `configure_seg_mmu`,
 - The causeInterrupt and SW_SET scan beyond AGXG4P.
 
 **Housekeeping:**
-- An `ipsw macho disass` run left a symbol cache, `/home/tcballard/Projects/j96-touch-20261030/downloads/kernel/19H386__iPad5,1/kernelcache.release.iPad5,1_2.a2s`, outside scratch. It is not in a git repo, nobody removed it, and the user may delete it.
 - Per-trace scratch work is in `/tmp/claude-1000/-home-tcballard-Projects/7aa9af37-4e91-48e5-a2e7-64bd8932ea91/scratchpad/gpu/m0-*/`.

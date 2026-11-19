@@ -16,7 +16,7 @@ Ground truth from iPadOS 15.8.3 on the iPad mini 4 (J96, A8), for two questions:
 | File | What | Origin |
 |---|---|---|
 | `kprobe.c` | Read-only kernel-memory probe: `task_for_pid(0)`, then host special port 4; finds the kernel slide by reading the Mach-O magic; `kprobe read ADDR LEN` hex-dumps kernel virtual memory | new |
-| `capture.m`, `iohook.m`, `app.m` | Metal compute/render jobs, then dumps of the process's GPU-shared memory and its IOKit calls | copied unchanged from OrchardLinux/gpu `tools/a10/ios-capture` at the commit in `UPSTREAM-COMMIT` (GPL-2.0-or-later) |
+| `../../a10/ios-capture/capture.m`, `iohook.m`, `app.m` | Metal compute/render jobs, then dumps of the process's GPU-shared memory and its IOKit calls | shared with the A10: `build.sh` builds them for iOS 15 (GPL-2.0-or-later) |
 | `entitlements.plist` | The A10 set plus `task_for_pid-allow`, `com.apple.system-task-ports` and the older IOAccel user-client names | adapted |
 | `session.py` | Host side: SSH key through palera1n's telnetd, key-only dropbear on the iPad's loopback, then push/run/pull over usbmux | adapted from the A10 `session.py` |
 | `build.sh` | Builds all three for `arm64-apple-ios15.0`, strips, signs ad hoc with `ldid` | adapted (the A10 scripts target iOS 16) |
@@ -24,7 +24,7 @@ Ground truth from iPadOS 15.8.3 on the iPad mini 4 (J96, A8), for two questions:
 
 ## Known gaps
 
-- `capture.m` is the A10 tool as is. Its needle scan looks for A10 (G9P) shader code, which
+- `capture.m` is the shared A10 tool. Its needle scan looks for A10 (G9P) shader code, which
   will not match on the A8; use `--light` (no needle scan; the full scan once panicked the
   A10) and compare regions by hand. Whether the A10's entitlement and foreground findings hold
   on iPadOS 15 / AGXG4P is unverified.
@@ -38,8 +38,8 @@ Ground truth from iPadOS 15.8.3 on the iPad mini 4 (J96, A8), for two questions:
 
 ## Build (no Mac: CI)
 
-The `J96 iOS capture tools` workflow runs on each push to this branch (or by hand from the
-Actions tab). Download its
+The `J96 iOS capture tools` workflow runs on each push to main that touches these tools or the
+shared capture sources, on pull requests, and by hand from the Actions tab. Download its
 `j96-ios-capture` artifact. Check `SHA256SUMS`. On a Mac: `sh build.sh`.
 
 ## Run (iPad)
