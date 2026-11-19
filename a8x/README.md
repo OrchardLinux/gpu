@@ -19,7 +19,7 @@ directory. The latest results and supporting notes are on the
 Storing `1` once to PMGR `0x20e032000` (MiscACG, the word iPadOS's `enableACG(true)` sets during
 `ApplePMGR::start()`) before the GPC request makes page 5 `+0x4` read `0x40000000` after the GPC poll on Linux, as on
 iPadOS. This reproduced on three of three boots with the store; the control without it read `0`. The first core-ID read
-(`0x201000020`) still hung afterwards. Details, tables and boundaries: [MISCACG-PAGE5.md](MISCACG-PAGE5.md).
+(`0x201000020`) still hung afterwards, including when issued about 2 us after the GPC poll. Details, tables and boundaries: [MISCACG-PAGE5.md](MISCACG-PAGE5.md).
 
 ## Measured on the J81 device
 
@@ -205,6 +205,7 @@ GPU performance level are separate state concepts. See the [format comparison][p
 - Check any remaining iBoot/iBEC state that a checkm8/PongoOS boot does not
   preserve; the LLB/iBoot analysis confirms that LLB programs the table and
   iBoot reads it, but it did not identify a software state-select write.
-- Page-5 bit 30 is now set on Linux by the MiscACG store (see the update above). Remaining: the core-window read
-  still hangs, so find the next missing step, or test whether issuing the read within microseconds of the GPC poll
-  (as iPadOS does) changes it. Whether MiscACG gates the GFX clock directly is not established.
+- Page-5 bit 30 is now set on Linux by the MiscACG store (see the update above). The core-window read still hangs,
+  also when issued about 2 us after the GPC poll, so another iPadOS pre-read step is missing. Next: compare the
+  page-1/page-4 request words and the other startup writes between `enableACG` and the first GPU access. Whether
+  MiscACG gates the GFX clock directly is not established.

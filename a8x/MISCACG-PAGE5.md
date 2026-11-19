@@ -76,9 +76,15 @@ particular clock, nor that the store is sufficient for anything beyond the word.
 
 With MiscACG at `1`, page 5 at `0x40000000`, GPC state `1` and GPC control `0x40000000` (all read immediately before),
 the first read of the core window (`0x201000020`) **still hung**: the host acknowledged the pre-read checkpoint, no
-result came back, and the hardware watchdog reset the iPad about 20 s later (one boot). That read was issued seconds after
-the GPC poll; iPadOS issues it tens of microseconds after. Whether the delay matters, or another iPadOS startup step is
-still missing, is not established. A same-boot timed variant is prepared but has not been run.
+result came back, and the hardware watchdog reset the iPad about 20 s later (one boot). That read was issued seconds after the GPC poll; iPadOS issues it tens of microseconds after.
+
+A second boot removed that delay: one watchdog-supervised tool did the GPC request, polled until state `1`, read
+page 5 (`0x40000000`) and read the core ID about 2 us after the poll succeeded (46 ticks of the 24 MHz counter, with
+MiscACG `1` and GPC state `1` confirmed just before). That read hung as well and the watchdog reset the iPad. So the
+delay is not what is missing: the core window did not answer at about 2 us or at seconds. Another step that iPadOS
+performs before its core read is still missing on Linux; which one is not established. Open comparison points are the
+page-1 and page-4 request words (`0x40480348` and `0x48480348` seen in an iPadOS window, `0x80480348` and `0x88480348`
+on Linux), other startup writes between `enableACG` and the first GPU access, and the remaining page-5 and `0x1c300` state.
 
 ## Boundaries
 
