@@ -22,6 +22,10 @@
  *    does not show the zero-extended 32-bit value for it.)
  *   far      = 0xbeef  (dump captured)  /  0xdead  (capture hook never ran)
  *
+ * The PMGR offsets below (region-0 base at pmgr+0xa70, the six clock pages,
+ * ps_gfx, perf-state control, 0x2300c) are A8/T7000-specific. To port, see the
+ * "PORTING CONFIG" block in j96_page5_capture.c.
+ *
  * READ-ONLY: no MMIO store.
  */
     .text

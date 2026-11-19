@@ -42,3 +42,10 @@ Unlock after reboot and collect the panic report (`collect-ios-reports.sh`).
 Decode the dump with `decode_dump.py panic-full-*.ips`: `far == 0xbeef` means
 the dump was captured, `0xdead` means the capture hook never ran. The page-5
 `+0x04` value (register `x7`) is the M1 answer: bit 30 set = GFX PLL running.
+
+## Porting
+
+The two-hook technique is SoC-agnostic, but the parameters are not. The hook
+sites, signatures, kernel UUID, kext bundle IDs and PMGR offsets are all
+A8/T7000 + `19H386`-specific. See the "PORTING CONFIG" block at the top of
+`j96_page5_capture.c` for exactly what to re-derive for a new SoC or OS build.

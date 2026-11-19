@@ -22,6 +22,24 @@
 extern uint32_t j96_page5_start[], j96_page5_end[];
 extern uint32_t j96_page5_poll_capture[], j96_page5_read[], j96_page5_buffer[];
 
+/*
+ * PORTING CONFIG ------------------------------------------------------------
+ * Everything device-specific is below and in j96_page5_shell.S. This probe is
+ * derived for the A8/T7000 (iPad5,1) on iPadOS 15.8.3 (19H386). To port to
+ * another SoC or OS build, re-derive (by disassembling the target kernelcache):
+ *   1. cap_sig / CAP_SITE  -- the capture site (ApplePMGR ps-poll `blr x8`).
+ *   2. rd_sig  / RD_SITE   -- the read site (AGXG4P post-GPC-poll `mov w0,#0xa`).
+ *   3. the kernel UUID in uuid_ok()  -- LC_UUID of the target kernelcache.
+ *   4. the kext bundle IDs in .patches -- swap AGXG4P for the target's GPU
+ *      driver; ApplePMGR usually stays the same.
+ *   5. the PMGR offsets in j96_page5_shell.S -- region-0 base (pmgr+0xa70),
+ *      clock pages, ps_gfx, perf-state control, 0x2300c. PMGR layout differs
+ *      between SoCs.
+ * The framework below (emit/finish/branch/buffer) is SoC-agnostic.
+ * verify_sites.py checks items 1-3 offline against the target kernelcache.
+ * ---------------------------------------------------------------------------
+ */
+
 /* capture signature: 11 words ending at `blr x8` (0x66e4294). */
 static const uint32_t cap_sig[11] = {
     0x531c6f24,  /* 0x66e426c  lsl w4, w25, #4            */
