@@ -11,7 +11,7 @@ and [OrchardLinux/mesa](https://github.com/OrchardLinux/mesa) (Vulkan).
 | Chip | Devices | State | Notes |
 |---|---|---|---|
 | A10 (T8010) | iPad 6 (J71b) | Hyprland with all effects at 60 fps (Zink on the G9P Vulkan driver) | [a10/](a10/README.md) |
-| A8X (T7001) | iPad Air 2 (J81) | Power-up reached; page-5 bit 30 now rises on Linux after one MiscACG store; the first core-ID read still hangs | [a8x/](a8x/README.md) |
+| A8X (T7001) | iPad Air 2 (J81) | Power-up reached; the core-ID read returns `0x00070500` on Linux once the PMGR `dwi` domain is on (two runs); nothing beyond it read yet | [a8x/](a8x/README.md) |
 
 More chips join as their own directories. The A9 (iPad 5) work is
 separate for now.
