@@ -14,6 +14,10 @@ layer). The detailed notes are under that repository's
 directory. The latest results and supporting notes are on the
 [J81 research branch](https://github.com/mattonik/ipad-nixos/blob/j81-dwi-gpu-compare/research/gpu-status.md).
 
+## Update, 21 November 2026: the core-ID read returns once `dwi` is on
+
+Switching the PMGR `dwi` power state (`0x20e020120`, `0x200` -> `0xff`) on before the GFX activation makes the first core-ID read (`0x201000020`) return `0x00070500` on Linux, as on iPadOS, on two of two runs; every earlier run hung. PMIC buck row `0x0128` follows the GFX request to `64/64` only with `dwi` on. Linux switches `dwi` off about 0.7 s into boot. Nothing beyond the core ID has been read. The sections below describe runs made without `dwi`. Details: [DWI-CORE-ID.md](DWI-CORE-ID.md).
+
 ## Update, 19 November 2026: page-5 bit 30 now rises on Linux
 
 Storing `1` once to PMGR `0x20e032000` (MiscACG, the word iPadOS's `enableACG(true)` sets during
