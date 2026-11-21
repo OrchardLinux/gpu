@@ -3,7 +3,7 @@
 This is a field report on GPU work for the iPad Air 2 Wi-Fi (`iPad5,3`, J81,
 Apple A8X/T7001, Imagination PowerVR GXA6850). It records experiments on one
 physical device and offline analysis of Apple kernelcaches through
-12 November 2026. It is not a driver, a device-profile change or a procedure.
+19 November 2026. It is not a driver, a device-profile change or a procedure.
 J81's `gpu = "missing"` in Orchard's
 [`devices/j81/device.toml`](https://github.com/OrchardLinux/orchard/blob/main/devices/j81/device.toml) is unchanged.
 
@@ -13,6 +13,13 @@ layer). The detailed notes are under that repository's
 [`research/`](https://github.com/mattonik/ipad-nixos/tree/main/research)
 directory. The latest results and supporting notes are on the
 [J81 research branch](https://github.com/mattonik/ipad-nixos/blob/j81-dwi-gpu-compare/research/gpu-status.md).
+
+## Update, 19 November 2026: page-5 bit 30 now rises on Linux
+
+Storing `1` once to PMGR `0x20e032000` (MiscACG, the word iPadOS's `enableACG(true)` sets during
+`ApplePMGR::start()`) before the GPC request makes page 5 `+0x4` read `0x40000000` after the GPC poll on Linux, as on
+iPadOS. This reproduced on three of three boots with the store; the control without it read `0`. The first core-ID read
+(`0x201000020`) still hung afterwards, including when issued about 2 us after the GPC poll. Details, tables and boundaries: [MISCACG-PAGE5.md](MISCACG-PAGE5.md).
 
 ## Measured on the J81 device
 
@@ -198,5 +205,7 @@ GPU performance level are separate state concepts. See the [format comparison][p
 - Check any remaining iBoot/iBEC state that a checkm8/PongoOS boot does not
   preserve; the LLB/iBoot analysis confirms that LLB programs the table and
   iBoot reads it, but it did not identify a software state-select write.
-- Resolve which state drives page-5 bit 30 and whether it matters for core
-  access before drawing a causal conclusion or proposing another core read.
+- Page-5 bit 30 is now set on Linux by the MiscACG store (see the update above). The core-window read still hangs,
+  also when issued about 2 us after the GPC poll, so another iPadOS pre-read step is missing. Next: compare the
+  page-1/page-4 request words and the other startup writes between `enableACG` and the first GPU access. Whether
+  MiscACG gates the GFX clock directly is not established.
