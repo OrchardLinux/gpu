@@ -14,6 +14,10 @@ layer). The detailed notes are under that repository's
 directory. The latest results and supporting notes are on the
 [J81 research branch](https://github.com/mattonik/ipad-nixos/blob/j81-dwi-gpu-compare/research/gpu-status.md).
 
+## Update, 22 November 2026: identity words, `dwi` always-on, and the firmware core is reachable
+
+Follow-up to [DWI-CORE-ID.md](DWI-CORE-ID.md), same device, same kernel pin. Details and logs' summaries: [DWI-FOLLOWUP.md](DWI-FOLLOWUP.md). In short (E = measured on the device): `apple,always-on` on `ps_dwi` keeps `dwi` on from boot and replaces the late store, with identical results; `CORE_ID` (`+0x18`) reads `0x011b0803` and `+0x24` reads 0 (BVNC revision word `0x00070500`); neither the PLL1 nor the PLL4 write was needed for these reads when omitted one at a time; the first RGX register page and the META slave port can be read, and the firmware core reads as a META MTP219 (by the upstream PowerVR table), idle, with both threads not running. One device, one run each.
+
 ## Update, 21 November 2026: the core-ID read returns once `dwi` is on
 
 Switching the PMGR `dwi` power state (`0x20e020120`, `0x200` -> `0xff`) on before the GFX activation makes the first core-ID read (`0x201000020`) return `0x00070500` on Linux, as on iPadOS, on two of two runs; every earlier run hung. PMIC buck row `0x0128` follows the GFX request to `64/64` only with `dwi` on. Linux switches `dwi` off about 0.7 s into boot. Nothing beyond the core ID has been read. The sections below describe runs made without `dwi`. Details: [DWI-CORE-ID.md](DWI-CORE-ID.md).
