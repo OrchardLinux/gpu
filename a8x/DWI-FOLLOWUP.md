@@ -47,5 +47,4 @@ current firmware, which probably differs from Apple's (**I**).
 
 ## Limits
 
-One device, one run per item, no firmware loaded, nothing written to GPU memory. Reads of the META register space and
-two address-select writes to `MSLVCTRL0` are the only GPU-side writes besides the power-up recipe.
+One device, one run per item, no firmware loaded, nothing written to GPU memory. The only GPU-side writes besides the power-up recipe are the address-select writes to `MSLVCTRL0`, one per META read.
