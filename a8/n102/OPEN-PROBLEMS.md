@@ -3,32 +3,18 @@
 What does not work yet on the iPod touch 6, what is known about each, and what is not. Tags as in
 [README.md](README.md#evidence-levels).
 
-## The Wayland stop on the PM-id kernel (under investigation)
+## Validating the PM-id kernel (in progress)
 
-**This is open and under investigation. Its cause is not known.**
-
-- **[HW]** The run: on the kernel with one PM id per VM ([BRINGUP.md](BRINGUP.md#pm-id-per-vm)), headless vkmark
-  next to labwc ran 20 s clean (551 fps, no faults). Then, with the PM pool raised to 61 blocks, vkmark on the
-  Wayland window system at panel size (640x1136) stopped the device about 4 s in: the kernel log ends, the network
-  goes silent, and there is no fault, hang or reset line. The pool was far from full (77 of 1952 pages used).
-- **Known:**
-  - **[KC]** 61 blocks is legal: the save and load fields are 22 bits wide, the per-id state is one pointer, and
-    Apple mixes pool sizes across PM ids all the time. Our stack, list and control block hold 61 blocks.
-  - **[HW]** A whole-SoC freeze is **not** established. The kernel was set to reboot at once on a panic, so a panic
-    would look the same from outside, and what the screen showed was not recorded.
-  - **[HW]** The run changed four things at once: the pool size, the window-system path, presentation at panel size
-    (possibly direct scanout through the display DART) and the run length. Wayland vkmark had not rendered on this
-    kernel before (an earlier step's pipeline had killed it), and only one VM was submitting.
-  - **[HW]** A silent stop at the default pool of 32 had already happened once **before** the PM-id change, during a
-    Zink client. It was never root-caused.
-- **Candidates, most likely first [INF]:** (1) Wayland presentation at panel size: labwc scanning out vkmark's
-  dma-bufs through the display DART, or GPU dma-buf sharing; (2) a kernel panic in a newly reached path; (3) the
-  ungated doorbell writing the MTS while the GPU PLL relocks (rare; headless runs are clean); (4) a GPU stall followed
-  by the timeout path's register read or reset locking the SoC; (5) the first high-rate save and load between PM
-  ids; (6) the 61-block pool itself, for which no mechanism has been found.
-- **Next:** a network console plus a synced on-disk heartbeat, then one change per run: two headless clients at 32
-  blocks; 61 blocks headless; Wayland composited at a small size; Wayland at panel size and 32 blocks with the KMS
-  state captured; then 61 and 16 blocks on Wayland.
+- **[HW]** On the kernel with one PM id per VM ([BRINGUP.md](BRINGUP.md#pm-id-per-vm)), headless vkmark next to
+  labwc ran 20 s clean (551 fps, no faults). Only one VM was submitting in that run, so switching between PM ids at
+  a high rate has not been exercised yet.
+- **[HW]** A later run that looked like a device stop (log ended, network silent) was the system's idle suspend:
+  the power daemon locked the screen at 62 s and suspended at 72 s, and the device resumed on the same boot when
+  woken. It was not a GPU problem.
+- **[KC]** 61-block pools are legal: the save and load fields are 22 bits wide, the per-id state is one pointer,
+  and Apple mixes pool sizes across PM ids. Our stack, list and control block hold 61 blocks.
+- **Next:** with suspend inhibited, one change per run: two headless clients at 32 blocks; 61 blocks headless;
+  Wayland composited at a small size; Wayland at panel size; 61 and 16 blocks on Wayland; the full vkmark suite.
 
 ### The earlier vkmark-on-Wayland fault
 
