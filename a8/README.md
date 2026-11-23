@@ -1,5 +1,8 @@
 # A8 (T7000) GPU work: iPad mini 4 (J96)
 
+> **Status note (23 Nov 2026):** the A8 GPU now runs a GPU desktop on the iPod touch 6 (N102) and passes the
+> tester kit on the iPhone 6 (N61); see [n102/](n102/README.md). The notes below are the iPad mini 4 (J96) work.
+
 Bring-up notes, hardware logs and probe modules for the GPU of the iPad mini 4 (J96,
 iPad5,1, Apple A8 / T7000), on iPadOS 15.8.3 kernelcache analysis and a RAM-booted Linux
 7.3.0-rc1 kernel. **Status: blocked at milestone M1.** The first read of the RGX core-ID

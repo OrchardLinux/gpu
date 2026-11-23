@@ -12,6 +12,7 @@ and [OrchardLinux/mesa](https://github.com/OrchardLinux/mesa) (Vulkan).
 |---|---|---|---|
 | A10 (T8010) | iPad 6 (J71b) | Hyprland with all effects at 60 fps (Zink on the G9P Vulkan driver) | [a10/](a10/README.md) |
 | A9 (S8000/S8003) | iPad 5 (J71s/J71t/J72s/J72t) | labwc desktop and Firefox with hardware WebRender on the GPU; merged in orchard as a powervr backend ([orchard#138](https://github.com/OrchardLinux/orchard/pull/138)) and [OrchardLinux/mesa#8](https://github.com/OrchardLinux/mesa/pull/8); see orchard's [docs/bring-up/gpu/a9-g5p.md](https://github.com/OrchardLinux/orchard/blob/main/docs/bring-up/gpu/a9-g5p.md) | [a9/](a9/README.md) |
+| A8 (T7000) | iPod touch 6 (N102), iPhone 6 (N61); iPad mini 4 (J96) | iPod touch 6: GPU desktop (labwc and Qt through Zink on the Vulkan driver), display-DART scanout; iPhone 6: tester kit 4 passes (Vulkan, ladder 51/52, display); vertex textures and a Wayland stop still open ([orchard#196](https://github.com/OrchardLinux/orchard/pull/196), [OrchardLinux/mesa#18](https://github.com/OrchardLinux/mesa/pull/18), open). iPad mini 4: earlier bring-up in a8/, tester kit run pending | [a8/n102/](a8/n102/README.md), [a8/](a8/README.md) |
 | A8X (T7001) | iPad Air 2 (J81) | Power-up reached; identity words read on Linux once the PMGR `dwi` domain is on (kept on by `apple,always-on`); the firmware core is a META MTP219, idle and readable through its slave port; no firmware loaded yet | [a8x/](a8x/README.md) |
 
 More chips join as their own directories.
