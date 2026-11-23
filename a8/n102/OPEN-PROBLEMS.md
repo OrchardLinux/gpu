@@ -3,18 +3,17 @@
 What does not work yet on the iPod touch 6, what is known about each, and what is not. Tags as in
 [README.md](README.md#evidence-levels).
 
-## Validating the PM-id kernel (in progress)
+## The PM-id kernel (validated)
 
-- **[HW]** On the kernel with one PM id per VM ([BRINGUP.md](BRINGUP.md#pm-id-per-vm)), headless vkmark next to
-  labwc ran 20 s clean (551 fps, no faults). Only one VM was submitting in that run, so switching between PM ids at
-  a high rate has not been exercised yet.
-- **[HW]** A later run that looked like a device stop (log ended, network silent) was the system's idle suspend:
-  the power daemon locked the screen at 62 s and suspended at 72 s, and the device resumed on the same boot when
-  woken. It was not a GPU problem.
+- **[HW]** On the kernel with one PM id per VM ([BRINGUP.md](BRINGUP.md#pm-id-per-vm)), every run was clean (no
+  firmware or MMU fault, no hang, no lost job): two headless vkmark clients at once (299 + 297 fps); one client
+  with a 61-block pool (611 fps); 32- and 61-block clients side by side, alternating PM ids (330 + 344 fps); vkmark
+  on Wayland at 320x568 (633 fps) and at panel size with direct scanout (502 fps); 61- and 16-block clients next to
+  the compositor (463 / 461 fps); the full vkmark suite on Wayland at 640x1136 (score 432, every scene).
+- **[HW]** An earlier run that looked like a device stop was the system's idle suspend (lock at 62 s, suspend at
+  72 s); the device resumed on the same boot.
 - **[KC]** 61-block pools are legal: the save and load fields are 22 bits wide, the per-id state is one pointer,
-  and Apple mixes pool sizes across PM ids. Our stack, list and control block hold 61 blocks.
-- **Next:** with suspend inhibited, one change per run: two headless clients at 32 blocks; 61 blocks headless;
-  Wayland composited at a small size; Wayland at panel size; 61 and 16 blocks on Wayland; the full vkmark suite.
+  and Apple mixes pool sizes across PM ids.
 
 ### The earlier vkmark-on-Wayland fault
 

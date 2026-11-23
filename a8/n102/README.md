@@ -24,8 +24,7 @@ different board.
   probe, Vulkan smoke (compute 32/32, triangle exact), ladder 51/52 and display 9/9 over MIPI DSI all pass.
 
 **Not yet [HW]:** vertex-stage textures, which Firefox's WebRender vertex programs need (fragment programs
-compile); R8 load and cube arithmetic; MSAA, sRGB targets, three or more colour targets; partial render. The PM-id
-kernel still needs a run with several clients switching. Details:
+compile); R8 load and cube arithmetic; MSAA, sRGB targets, three or more colour targets; partial render. Details:
 [OPEN-PROBLEMS.md](OPEN-PROBLEMS.md).
 
 ## Numbers
@@ -57,7 +56,7 @@ next target.
 | [MEMORY.md](MEMORY.md) | PBE words, ZLS tile rounding, colour tile padding, region headers, Qt without depth/stencil, GL without LLVM |
 | [DISPLAY.md](DISPLAY.md) | adbe on the T7000, display-DART scanout and its self-check, MIPI vs eDP, the iPhone 6 result |
 | [POWER.md](POWER.md) | GPU idle (self-park and host power-off) and the D2186 USB charge grant |
-| [OPEN-PROBLEMS.md](OPEN-PROBLEMS.md) | validating the PM-id kernel, vertex textures, R8 load and cube arithmetic, what is still refused |
+| [OPEN-PROBLEMS.md](OPEN-PROBLEMS.md) | the PM-id kernel runs, vertex textures, R8 load and cube arithmetic, what is still refused |
 | [A8X.md](A8X.md) | what carries over to the A8X (T7001, iPad Air 2) and what differs |
 
 ## Evidence levels
