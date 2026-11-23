@@ -43,6 +43,7 @@ Under GPU load the iPod drained its battery to 0 while plugged into a Mac.
   only `0x4c0`. The N102 device tree caps it at 1500 mA. Attach and detach come from a 1 s poll (no PMU event line
   for this on N102).
 - **State:** the series is written (PMU binding and driver, dwc2, the N102 device tree) on top of the N102 battery
-  series ([orchard#202](https://github.com/OrchardLinux/orchard/pull/202), D2186 battery status); **it has not flown
-  on the N102 yet.** Above 40 °C the grant falls back to 500 mA, so drain under heavy GPU
+  series ([orchard#202](https://github.com/OrchardLinux/orchard/pull/202), D2186 battery status). **[HW]** It runs
+  on the N102 in the combined development kernel: with the grant applied the USB input rose to about 1 A (from
+  130-216 mA) and the battery reports Charging under the GPU desktop. It is not yet a pull request. Above 40 °C the grant falls back to 500 mA, so drain under heavy GPU
   load can return there **[INF]**. The battery's current reads 0 while charging (open).
