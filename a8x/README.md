@@ -3,7 +3,7 @@
 This is a field report on GPU work for the iPad Air 2 Wi-Fi (`iPad5,3`, J81,
 Apple A8X/T7001, Imagination PowerVR GXA6850). It records experiments on one
 physical device and offline analysis of Apple kernelcaches through
-19 November 2026. It is not a driver, a device-profile change or a procedure.
+26 November 2026. It is not a driver, a device-profile change or a procedure.
 J81's `gpu = "missing"` in Orchard's
 [`devices/j81/device.toml`](https://github.com/OrchardLinux/orchard/blob/main/devices/j81/device.toml) is unchanged.
 
@@ -13,6 +13,10 @@ layer). The detailed notes are under that repository's
 [`research/`](https://github.com/mattonik/ipad-nixos/tree/main/research)
 directory. The latest results and supporting notes are on the
 [J81 research branch](https://github.com/mattonik/ipad-nixos/blob/j81-dwi-gpu-compare/research/gpu-status.md).
+
+## Update, 26 November 2026: Apple's META firmware boots to its alive event under Linux
+
+Follow-up to [DWI-FOLLOWUP.md](DWI-FOLLOWUP.md), same device and kernel pin. Details, the corrected claims and what is next: [FIRMWARE-BOOT.md](FIRMWARE-BOOT.md); offline tools: [`tools/a8x/`](../tools/a8x/README.md). In short (E = measured): Fender replays the ConfigRAM list at the GPC 0 to 1 request (the GFX bridge settings must be re-applied after every GFX power-on, and the Fender window must be mapped in full); the firmware (META MTP219) boots from a host-built memory image through host-built GPU page tables, loads its code into core memory, initialises its tables and posts its alive event; the record only became visible after an SLC flush because our firmware pages are not mapped with SLC bypass (Orchard's A8/A9 flags are the next change). The earlier claims that the Fender override store or later RGX reads hang the bus were a bug in our module (a too-small mapping), corrected there. One device, no job submitted, no frame rendered.
 
 ## Update, 22 November 2026: identity words, `dwi` always-on, and the firmware core is reachable
 
@@ -39,8 +43,7 @@ iPadOS. This reproduced on three of three boots with the store; the control with
 | RGX identity | The first core-ID read at `0x201000020` (reg index 0, offset `+0x20`) never completed. The device hung and USB networking dropped. | Cause unknown. A later attempt after restoring 20 power domains also returned no value; see below. |
 | MCC | One later, watchdog-supervised read returned `0x200000830 = 0`. | The value does not show the MCC state. |
 
-No GPU firmware has been demonstrated on Linux, no job has been submitted and
-no frame has been rendered. A8X has no EL2, so m1n1 hypervisor MMIO tracing of iOS is not
+No GPU job has been submitted and no frame has been rendered (the firmware boots, see the 26 November update at the top). A8X has no EL2, so m1n1 hypervisor MMIO tracing of iOS is not
 possible on this SoC.
 
 ### Later iPadOS and Linux comparisons (11–12 November)
