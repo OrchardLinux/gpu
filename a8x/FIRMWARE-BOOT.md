@@ -1,4 +1,4 @@
-# iPad Air 2 (J81): Apple's META firmware boots under Linux, up to its idle loop
+# iPad Air 2 (J81): Apple's META firmware boots to its alive event under Linux
 
 Field report, 26 November 2026. One iPad Air 2 Wi-Fi (`iPad5,3`, J81, A8X/T7001,
 PowerVR GXA6850), Linux 7.3.0-rc1 (Hoolock `6831bc7`, Orchard's `apple-4k` pin),
@@ -18,12 +18,16 @@ The offline tools are in [`tools/a8x/`](../tools/a8x/README.md).
 On Linux, the firmware core (a META MTP219) runs Apple's own firmware, loaded
 from a memory image the host builds: its bootloader runs through GPU page tables
 we build, it loads its code into core memory, reads our root and state blocks,
-builds its internal context tables, enables thread 0 and parks it in its scheduler
-idle loop. There is no META fault and no BIF fault, and the SoC stays up. The
-firmware does not post its first ("alive") event record, so the host handshake
-iPadOS completes does not complete. The firmware's code is MiniM (META's compressed
-16-bit instruction set); there is no public decoder, so what it waits on is unknown.
-No job was submitted and no frame was rendered.
+builds its internal context tables, enables thread 0, **posts its type-0 alive
+event** (with the PC of its idle loop, `0x80009c14` in core memory) and idles.
+There is no META fault and no BIF fault, and the SoC stays up. For most of the
+work we did not see the event: our page-table entries for the firmware's memory
+are valid-only, so its writes sat in the SLC (a write-back cache) while the host
+read uncached DRAM; one SLC flush (RGX `0x3818 <- 1`, then poll `0x3898`) made
+the record visible (run 65). Next: map the firmware's pages with SLC bypass and
+PM/META protect as Orchard's A8/A9 driver does, then the perf-state table, the
+POLICY block and the firmware's hardware objects, before any job. No job was
+submitted and no frame was rendered.
 
 ## The sequence that works
 
@@ -65,29 +69,26 @@ No job was submitted and no frame was rendered.
 
 ## What the firmware has done and is doing
 
-- Within 2 s of the release it wrote 121 words into our image and then nothing for the
-  six seconds we watched: its globals (block base in `A1GbP`), root and state addresses
+- Within 2 s of the release it wrote 121 words into our image that had left the SLC
+  (323 after a flush, including the alive record): its globals, root and state addresses
   copied from our tail word, 16-entry context lists in the list-head blocks, and a core
   memory table of the first nine USC exception-slot register offsets.
-- Thread 0 enabled (`T0ENABLE 0x0201c031`), no catch registers, `TXSTATUS` toggling. A
-  halted snapshot (`TXENABLE <- 0xfffffffe`) puts the PC at META `0x10000358`, PCX
-  `0x10000454`; register D1.5 holds the firmware address of the scheduler block's
-  `enqueued_commands[0]` (named in the host's own debug dump), so thread 0 is polling the
-  priority-0 queue count (*inferred*, strong).
-- Thread 1 is never started by the firmware. Started by us through the core-register port
-  (SP `0x8000b3c8`, PC `0x20000000`, `T1ENABLE | 1`) it runs to `0x200004b8` and parks.
-- The MTS doorbell the host uses (`RGX 0xb00 <- 0x10` after Fender `+0x14 <- 7`) changes
-  nothing visible, with or without thread 1 running.
-- BIF fault `0x12b0` reads 0 in every run; no USC exception slot is pending.
+- Thread 0 enabled (`T0ENABLE 0x0201c031`), no catch registers. It idles in the scheduler
+  (halted snapshot: PC `0x10000358` polling the priority-0 `enqueued_commands`; the alive
+  record reports `0x80009c14`). Thread 1 is not started by the firmware and is not needed
+  (Orchard's A9 path does not start it either).
+- The MTS doorbell (`RGX 0xb00 <- 0x10` after Fender `+0x14 <- 7`) changes nothing with
+  empty queues. BIF fault `0x12b0` reads 0 in every run; no USC exception slot is pending.
 
-## Open
+## Next
 
-What the firmware waits on before the alive record. Apple's host gives it nothing but the
-release, the 0 to 1 request and the AIC unmask for lines `0x86`/`0x87`/`0x8a`. Needs the
-firmware code: a MiniM decoder (binutils 2.30, the last release with the `metag` target,
-decodes only classic META: its `metag-dis.c` has no MiniM), or halted single-stepping of
-thread 0 (not tried). If you have IMG's toolchain or MiniM documentation, that is the
-thing this work is missing.
+From Orchard's A8/A9 reference driver (request 18 in the notes): page-table flags
+(`valid | bit 3 SLC bypass | bit 62 PM/META protect` for the heap, bit 3 for the MMIO
+windows), the perf-state table in config `+0x29c..+0x2e3` (our captured ADT leaves it
+empty), the POLICY block that Apple fills on its boot path, and four small hardware
+objects named in config. Then a first command. The firmware code is MiniM and cannot
+be decoded publicly; that is no longer needed for boot. Why a slave-port read of core
+memory near the idle PC returned noise is not understood.
 
 ## Method and Apple data
 
