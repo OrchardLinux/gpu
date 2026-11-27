@@ -7,8 +7,9 @@ KERNELCACHE is the decompressed arm64 Mach-O kernelcache (the old *prelinked*
 layout with __PRELINK_INFO, as on iOS 9-16 for A7-A10 devices; MH_FILESET
 kernelcaches are refused). --gpu picks the kext family suffix: the A9 uses
 com.apple.AGXG5P / com.apple.AGXFirmwareKextG5P. Other chips use other
-suffixes (list the CFBundleIdentifiers with --list first; we have only run
-this on the A9, iOS 16.7.10).
+suffixes (list the CFBundleIdentifiers with --list first). We have run this
+on the A9 (iOS 16.7.10, G5P), the A8 (iPad5,1, iOS 15.8.8, G4P) and the A8X
+(iPad5,3, iOS 12.4, G4G).
 
 Output (keep it out of any public repository: it is Apple code):
   <kext>.macho          analysis copy of each kext, VAs preserved, file offsets repacked
@@ -271,7 +272,12 @@ def main():
                     kernelcache_sha256=sha(kc), kernelcache_size=len(kc),
                     prelink_info_offset=prelink["fileoff"], kexts={})
     fw_bundle = f"com.apple.AGXFirmwareKext{args.gpu}"
-    for bundle in (f"com.apple.AGX{args.gpu}", fw_bundle, "com.apple.iokit.IOGPUFamily"):
+    # The GPU family kext: IOGPUFamily (iOS 16.7.10 on the A9), or
+    # IOAcceleratorFamily2 (the A8's iOS 15.8.8, the A8X's iOS 12.4). The first one present is extracted.
+    ids = [e.get("CFBundleIdentifier") for e in info["_PrelinkInfoDictionary"]]
+    family = next((b for b in ("com.apple.iokit.IOGPUFamily", "com.apple.iokit.IOAcceleratorFamily2")
+                   if b in ids), "com.apple.iokit.IOGPUFamily")
+    for bundle in (f"com.apple.AGX{args.gpu}", fw_bundle, family):
         matches = [e for e in info["_PrelinkInfoDictionary"] if e.get("CFBundleIdentifier") == bundle]
         if len(matches) != 1:
             raise ValueError(f"expected exactly one {bundle} (try --list)")
