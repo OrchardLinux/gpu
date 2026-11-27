@@ -99,8 +99,15 @@ CONTROL `+0x1024` counts up (the firmware's command-8 handler ran), the device-c
 The pins we added (q = 1, N = 4, our perf table's start and highest state): POLICY `+0x0c = 4` (the A9's
 `+0x08` u64 `0x4_00000000`), POLICY `+0x688/+0x68c = 400`, `+0x6f0/+0x6f4 = 100`, CONTROL `+0x1028 = 3348` (the
 A9's envelope in mW; J81's is unknown), `+0x102c/+0x1040 = 100`, `+0x1030/+0x1038 = 400`. Nothing else changed
-(memory-only; the same host sequence). We have **not** yet bisected which of the pins is the necessary one,
-and no job was submitted: the slot load (command 3) and a first compute job are next.
+(memory-only; the same host sequence). We have **not** yet bisected which of the pins is the necessary one.
+
+**The slot load (command 3), run 87:** consumed as well, once `MMU_ROOT[0]` (slot 0, the firmware's own
+context; the 8-byte-per-slot block named by CONTROL `+0x1048`) holds our page catalogue: entry `{3, 1, 0, 0, 0}`
+with `MMU_ROOT[1]` = the catalogue and `TAG_HOST[1] = 0x00400000`; the consumer moves 1 to 2 at once, the
+firmware's seen-tag for slot 1 reads `0x00400000`, and `EVENT_STATUS` stays 0. With `MMU_ROOT[0]` left 0 (run 86)
+the handler copied the tag and then stalled with a new instruction-fetch MMU fault (the firmware's own next
+fetch, bank 1, GPU VA `0xe1c0007580`): the handler refreshes the GART from the root table, so slot 0 must hold
+the firmware's own catalogue, as in Orchard's driver. No job was submitted: a first compute job is next.
 
 **Before the pins (runs 66 to 84, same device, same host sequence, for the record):** the firmware never
 consumed the command. What we measured:
