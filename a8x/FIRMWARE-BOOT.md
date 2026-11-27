@@ -1,12 +1,14 @@
 # iPad Air 2 (J81): Apple's META firmware boots to its alive event under Linux
 
-Field report, 26 November 2026. One iPad Air 2 Wi-Fi (`iPad5,3`, J81, A8X/T7001,
+Field report, 26 November 2026, updated 27 November 2026 (runs 65 to 84: the firmware is
+alive with Orchard's page-table flags; the first host command is not consumed, see
+"The first command" below). One iPad Air 2 Wi-Fi (`iPad5,3`, J81, A8X/T7001,
 PowerVR GXA6850), Linux 7.3.0-rc1 (Hoolock `6831bc7`, Orchard's `apple-4k` pin),
 iPadOS 15.8.5 (19H394) as the reference kernelcache. Follow-up to
 [DWI-FOLLOWUP.md](DWI-FOLLOWUP.md). It is not a driver and not a procedure for
 other devices; J81's `gpu = "missing"` in Orchard's `devices/j81/device.toml`
 is unchanged. Measured on the device unless tagged *inferred*. The run log
-(runs 12 to 64), the runbook and the module are in
+(runs 12 to 84), the runbook and the module are in
 [mattonik/ipad-nixos](https://github.com/mattonik/ipad-nixos):
 [`docs/j81-gpu-firmware-boot.md`](https://github.com/mattonik/ipad-nixos/blob/main/docs/j81-gpu-firmware-boot.md),
 [`docs/j81-f3a-runbook.md`](https://github.com/mattonik/ipad-nixos/blob/main/docs/j81-f3a-runbook.md),
@@ -80,9 +82,53 @@ submitted and no frame was rendered.
 - The MTS doorbell (`RGX 0xb00 <- 0x10` after Fender `+0x14 <- 7`) changes nothing with
   empty queues. BIF fault `0x12b0` reads 0 in every run; no USC exception slot is pending.
 
+## The first command (runs 66 to 84, 27 November 2026)
+
+With Orchard's A8/A9 flags (heap `valid | bit 3 | bit 62`, windows `valid | bit 3`) the alive record is
+visible at once (run 66, no SLC flush). We then added the perf-state table, the POLICY minimum and the
+four hardware objects (run 67), and tried the first host-to-firmware command on the device-control
+ring (an empty type 8 `PerfCtrSamplerCommitCounterList`, then type 3 slot loads were planned): the
+ring protocol is Apple's `submitDeviceControl` write for write (entry, `dmb`, producer index at control
+`+0x10`, Fender `+0x14 <- 7`, `RGX 0xb00 <- 0x10`). **The firmware never consumes it** (consumer index
+stays 0; no event, no BIF stall). What we measured, one device, all reads unless noted:
+
+- After the kick `RGX 0xb10` reads `0x10` (the MTS presents the DM0 task) and stays; `0xba8`, `0xb98`,
+  `0xbb0`, `0xac8` stay 0; Fender `KICK_STATUS +0x8` stays 0. A non-counted kick (`0xb00 <- 0/1/2`) and
+  an interrupt-context kick (`0x30`) leave no trace at all. `0xbc8` (SCHEDULE_ENABLE) and `0xb08` read 0 and
+  ignore host writes; `EVENT_CLEAR 0x138` is writable. `0xb20` reads `0x8010`, `0xb50` `0xc0000000`,
+  `0xb54` `0x7e1`.
+- A META slave-port read request issued after alive (`MSLVCTRL1` goes `0x07000040` to `0x06000040`, READY
+  clear) is never serviced in 30 s, with the PMGR clock on and locked (`PS_GFX 0x3ff`, PLL lock, `CLK_STATUS
+  0x00600000`), so the firmware's own thread timer does not wake it either. The slave port works before the
+  firmware reaches its idle loop; protect bit 62 is not the cause (run 76).
+- `EVENT_STATUS 0x130 = 0x200` (MMU_PAGE_FAULT) from META's release on, with BIF fault bank 1 (not bank 0:
+  our earlier fault check read only bank 0) showing one instruction-fetch read by META thread 0 (request
+  address `0xe1c000df80`, a mapped heap page, tag 3, context 0). Clearing the event, invalidating the MMU
+  caches in the ConfigRAM list before the release, a zero page at GPU VA 0 and an alias of the heap at
+  `0xc0000000` change nothing (runs 81 to 84).
+- Our 31-word Fender ConfigRAM list is, word for word, the one Apple's host builds (no computed entries; the
+  firmware reads none of those registers back). Fender sequence, MTS values, POLICY and gate pointers match
+  what Apple's host does (*inferred*, from the J81 kext); `CONTROL +0x20 = 1` (iOS's idle-power-off default)
+  changes nothing.
+- *Inferred* from the decoded firmware (Orchard's `minim.py` expands it for binutils 2.30 and works on the
+  J81 text): thread 0 sleeps in its idle loop on a META trigger (external line 0 routed to trigger 5, plus its
+  own timer, which it masks when its rings are empty); the MTS-to-META delivery of any task, interrupt or
+  background, is what never happens. The firmware side of the routing is complete.
+
+So every host-side variable we could find in the kext, in Orchard's notes and in the decode has been tried
+and is negative; what is missing is not visible from the host. This is the state on **one** A8X, with
+Apple's firmware from 19H394 and Orchard's flags; Orchard's A8X note says the driver has not run on an A8X.
+
+**Questions for Orchard** (any of these would unblock us): on your working A8 or A9, after alive and after
+the first kick, what do `RGX 0xb10`, `0xb98`, `0xbb0`, `0x130`, `0xb08`, `0xb20`, `0xb54` and a pending
+slave-port request (`MSLVCTRL1`) read? Does your first type-8 command get consumed with the host sequence
+above, and does your timer tick (alive about 290 times a second per your notes) start without any host
+write after the release? Anything A8X-specific in the MTS to META path (`RGX 0x8238`, the 66 bridge stores,
+`dwi`) that your A8 does not need?
+
 ## Next
 
-From Orchard's A8/A9 reference driver (request 18 in the notes): page-table flags
+(Superseded by the section above: the page-table flags, perf-state table, POLICY block and hardware objects are done.) Originally, from Orchard's A8/A9 reference driver (request 18 in the notes): page-table flags
 (`valid | bit 3 SLC bypass | bit 62 PM/META protect` for the heap, bit 3 for the MMIO
 windows), the perf-state table in config `+0x29c..+0x2e3` (our captured ADT leaves it
 empty), the POLICY block that Apple fills on its boot path, and four small hardware
