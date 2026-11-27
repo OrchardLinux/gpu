@@ -2,10 +2,15 @@
 """Experimental MINIM-to-META expander, GP subset (provisional; see the limits below).
 
 usage: minim.py REGION_DIR [BASE ...] [--objdump PATH | --docker-image IMAGE --tools-dir DIR]
+       minim.py --base BASE (--pc PC | --storage ADDR)
   REGION_DIR holds <base>.bin images from disassemble-ldr.py. For each BASE (hex;
-  default: every <base>.bin there) it writes <base>.expanded.bin, <base>.minim.json
-  and, with a META objdump, <base>.minim.dis (original PC, storage bytes, decode).
+  default: every <base>.bin there) it writes <base>.expanded.bin, <base>.minim.json,
+  <base>.minim-stats.json and, with a META objdump, <base>.minim.dis (original PC,
+  storage bytes, decode). The objdump is --objdump, else $METAG_OBJDUMP, else
+  --docker-image with --tools-dir; without one only the JSON files are written.
   Keep REGION_DIR out of public repositories: it is Apple firmware.
+  --pc/--storage convert between an execution PC and the address the bytes are
+  stored at (pc = 2*storage - base), e.g. to read the code at a PC the firmware reports.
 
 Based on public Imagination Meta HTP TRM 2.1.235 section 3.
 Produces address-preserving standard instructions for GNU metag objdump.
@@ -16,8 +21,18 @@ decode_storage()/decode_one() take the exact storage bytes. Short 2-byte
 branches are classified and encoded by short_branch()/encode_branch(); the
 proven TRM field layout is documented in the block below.
 """
-import argparse,pathlib,struct,json,subprocess
+import argparse,collections,os,pathlib,re,struct,json,subprocess
 OUT=None; OBJDUMP=None
+
+def pc_to_storage(pc,base):
+ """Storage address of the instruction at execution PC `pc` in a region at `base`."""
+ if pc<base or (pc-base)%2:raise ValueError(f'{pc:#x} is not a MINIM PC in the region at {base:#x}')
+ return base+(pc-base)//2
+
+def storage_to_pc(storage,base):
+ """Execution PC of the instruction stored at `storage` in a region at `base`."""
+ if storage<base:raise ValueError(f'{storage:#x} is below the region at {base:#x}')
+ return 2*storage-base
 def bits(x,a,n=1):return (x>>a)&((1<<n)-1)
 def sx(x,n):return (x^(1<<(n-1)))-(1<<(n-1))
 
@@ -263,6 +278,34 @@ def expand_long(h,h2):
   return 0xac000000|(bits(h,5,5)<<19)|(bits(h,0,5)<<14)|pay
  return None
 
+# Standard META major opcodes (TRM 2.1.235 section 2), by MINIM bits 15..12 of the main halfword
+FAMILY=('ADD','SUB','AND','OR','XOR','shift','MUL','CMP/TST','A-unit ADD/SUB','branch/MOV/MSET','GET/SET')
+
+def unknown_reason(raw):
+ """Why expand()/expand_long() rejected the instruction in `raw` (its storage bytes)."""
+ h=struct.unpack_from('<H',raw)[0]
+ if len(raw)==2:
+  return f'short {FAMILY[h>>12]} (op9 group {bits(h,10,2)} sub {bits(h,8,2)})' if h>>12==9 else f'short {FAMILY[h>>12]}'
+ h2=struct.unpack_from('<H',raw,2)[0]
+ if h<0xc000:return f'long sub {bits(h,8,4):#x}, second halfword {h2>>14:#x}..'
+ e=h&0x3fff;op=h2>>12;name=FAMILY[op] if op<len(FAMILY) else f'op {op:#x}'
+ if op<=6 and bits(e,12):return f'extended {name}, conditional form (ext bit 12) not implemented for this op/operand'
+ if op in (7,8) and bits(e,13):return f'extended {name}, ext bit 13 set'
+ if op==7:return f'extended {name}, register form with ext bits 7..1 set'
+ if op==9:return f'extended {name} (group {bits(h2,10,2)})'
+ if op==10:return f'extended {name}, multi-register form'
+ return f'extended {name}'
+
+def stats(rows):
+ """Counts for a region: instructions, 0x0000 halfwords, decoded, rejected (by reason)."""
+ zero=sum(1 for r in rows if r['raw']=='0000')
+ unknown=[r for r in rows if r['expanded'] is None]
+ reasons=collections.Counter(unknown_reason(bytes.fromhex(r['raw'])) for r in unknown)
+ nonzero=len(rows)-zero
+ return {'instructions':len(rows),'zero_halfwords':zero,'nonzero':nonzero,'unknown':len(unknown),
+         'decoded_nonzero_percent':round(100*(nonzero-len(unknown))/nonzero,2) if nonzero else None,
+         'unknown_by_reason':dict(reasons.most_common())}
+
 def run(base):
  b=(OUT/f'{base:08x}.bin').read_bytes(); out=bytearray(len(b)*2);rows=[];i=0
  while i+2<=len(b):
@@ -283,18 +326,46 @@ def run(base):
   rows.append({'pc':hex(pc),'storage':hex(base+start),'raw':b[start:i].hex(),'expanded':hex(w) if w is not None else None})
  (OUT/f'{base:08x}.expanded.bin').write_bytes(out)
  (OUT/f'{base:08x}.minim.json').write_text(json.dumps(rows,indent=1))
- if OBJDUMP is None:return
+ st=dict(base=hex(base),**stats(rows))
+ (OUT/f'{base:08x}.minim-stats.json').write_text(json.dumps(st,indent=1)+'\n')
+ print(f"{base:08x}: {st['instructions']} instructions, {st['zero_halfwords']} zero halfwords, "
+       f"{st['unknown']} UNKNOWN, {st['decoded_nonzero_percent']}% of the nonzero ones expanded")
+ if OBJDUMP is None:return st
+ # -z: print zero words too; without it objdump folds zero runs into "..." and
+ # the 0x0000 halfwords (zero fill) would have no line of their own.
  with (OUT/f'{base:08x}.expanded.dis').open('w') as f:subprocess.run(OBJDUMP(f'{base:08x}.expanded.bin',base),stdout=f,check=True)
- # Remove padding/unknown lines; annotate all originals.
- lines={int(s.split(':')[0],16):s.strip() for s in (OUT/f'{base:08x}.expanded.dis').read_text().splitlines() if ':' in s and s.split(':')[0].isalnum()}
- (OUT/f'{base:08x}.minim.dis').write_text('\n'.join(f"{r['pc']} [storage {r['storage']} {r['raw']}]: "+(lines.get(int(r['pc'],16),'?').split('\t',2)[-1] if r['expanded'] else 'UNKNOWN') for r in rows)+'\n')
-if __name__=='__main__':
+ lines={}
+ for s in (OUT/f'{base:08x}.expanded.dis').read_text().splitlines():
+  m=re.match(r'\s*([0-9a-f]+):\t[0-9a-f ]+\t(.*)$',s)
+  if m:lines[int(m.group(1),16)]=m.group(2).strip()
+ def text(r):
+  if r['expanded'] is None:return 'UNKNOWN'
+  t=lines.get(int(r['pc'],16),'?')
+  return t+'   ; 0x0000 halfword' if r['raw']=='0000' else t
+ (OUT/f'{base:08x}.minim.dis').write_text('\n'.join(f"{r['pc']} [storage {r['storage']} {r['raw']}]: {text(r)}" for r in rows)+'\n')
+ return st
+
+def main(argv=None):
+ global OUT,OBJDUMP
  ap=argparse.ArgumentParser(description=__doc__,formatter_class=argparse.RawDescriptionHelpFormatter)
- ap.add_argument('dir',type=pathlib.Path);ap.add_argument('bases',nargs='*')
- ap.add_argument('--objdump');ap.add_argument('--docker-image');ap.add_argument('--tools-dir',type=pathlib.Path)
- a=ap.parse_args();OUT=a.dir.resolve()
- flags=lambda base:['-D','-b','binary','-m','metag',f'--adjust-vma={base}']
- if a.objdump:OBJDUMP=lambda n,base:[a.objdump]+flags(base)+[str(OUT/n)]
+ ap.add_argument('dir',type=pathlib.Path,nargs='?');ap.add_argument('bases',nargs='*')
+ ap.add_argument('--objdump',help='metag-linux-objdump (default: $METAG_OBJDUMP)')
+ ap.add_argument('--docker-image');ap.add_argument('--tools-dir',type=pathlib.Path)
+ ap.add_argument('--base',type=lambda x:int(x,16),help='region base for --pc/--storage')
+ ap.add_argument('--pc',type=lambda x:int(x,16));ap.add_argument('--storage',type=lambda x:int(x,16))
+ a=ap.parse_args(argv)
+ if a.pc is not None or a.storage is not None:
+  if a.base is None:ap.error('--pc/--storage need --base')
+  if a.pc is not None:print(f'pc {a.pc:#010x} -> storage {pc_to_storage(a.pc,a.base):#010x}')
+  if a.storage is not None:print(f'storage {a.storage:#010x} -> pc {storage_to_pc(a.storage,a.base):#010x}')
+  return
+ if a.dir is None:ap.error('REGION_DIR is required')
+ OUT=a.dir.resolve()
+ flags=lambda base:['-D','-z','-b','binary','-m','metag',f'--adjust-vma={base}']
+ objdump=a.objdump or os.environ.get('METAG_OBJDUMP')
+ if objdump:OBJDUMP=lambda n,base:[objdump]+flags(base)+[str(OUT/n)]
  elif a.docker_image and a.tools_dir:OBJDUMP=lambda n,base:['docker','run','--rm','-v',f'{OUT}:/fw','-v',f'{a.tools_dir.resolve()}:/tools',a.docker_image,'/tools/bin/metag-linux-objdump']+flags(base)+[f'/fw/{n}']
  bases=[int(x,16) for x in a.bases] or sorted(int(p.stem,16) for p in OUT.glob('*.bin') if len(p.stem)==8 and p.stem.isalnum() and '.' not in p.stem)
  for base in bases:run(base)
+
+if __name__=='__main__':main()
